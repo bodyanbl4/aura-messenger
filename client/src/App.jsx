@@ -20,7 +20,7 @@ import {
   Search, MessageCircle, ChevronLeft, Send, Phone, Plus,
   User as UserIcon, LogOut, Video, Moon, Sun, Camera,
   ChevronRight, Bell, Shield, Smartphone, Globe, MoreHorizontal, Edit3, Mic, Save, Square, Play,
-  Check, CheckCheck, X, Trash2
+  Check, CheckCheck, X, Heart, ThumbsUp, Flame, Laugh
 } from 'lucide-react';
 
 // --- 🔑 ТВОЯ КОНФИГУРАЦИЯ FIREBASE ---
@@ -61,98 +61,69 @@ const auraStyles = (isDark) => `
     position: relative; display: flex; flex-direction: column; overflow: hidden; 
   }
 
-  /* Плавные переходы страниц */
-  .view-container { 
-    flex: 1; display: flex; flex-direction: column; height: 100%; 
-    animation: slideIn 0.3s cubic-bezier(0.32, 0.72, 0, 1);
-  }
-  @keyframes slideIn { from { transform: translateX(30px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  /* Анимации */
+  .view-container { flex: 1; display: flex; flex-direction: column; height: 100%; animation: slideIn 0.3s ease-out; }
+  @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
-  /* Карточка авторизации */
-  .auth-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; }
   .auth-card { 
     background: var(--card-bg); width: 100%; max-width: 360px; padding: 40px 24px; 
     border-radius: 32px; box-shadow: 0 15px 35px rgba(0,0,0,0.1); 
-    display: flex; flex-direction: column; 
   }
-  
-  .input-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; width: 100%; }
-  .input-label { font-size: 13px; font-weight: 600; color: var(--text-sec); margin-left: 4px; }
+
   .ios-input { 
     width: 100%; padding: 14px 16px; border-radius: 12px; 
     border: 1.5px solid var(--sep); background: ${isDark ? '#2C2C2E' : '#FFFFFF'}; 
-    color: var(--text-main); font-size: 16px; outline: none; transition: border-color 0.2s;
+    color: var(--text-main); font-size: 16px; outline: none;
   }
-  .ios-input:focus { border-color: var(--ios-blue); }
 
   .btn-primary { 
     width: 100%; padding: 16px; background: var(--ios-blue); color: white; 
-    border: none; border-radius: 16px; font-weight: 700; font-size: 17px; cursor: pointer; 
-    transition: transform 0.1s; 
+    border: none; border-radius: 16px; font-weight: 700; font-size: 17px; 
   }
-  .btn-primary:active { transform: scale(0.96); }
 
-  /* Навигация */
   .nav-bar { 
     padding: 55px 16px 15px; background: var(--nav-bg); backdrop-filter: blur(25px); 
     border-bottom: 0.5px solid var(--sep); display: flex; align-items: center; 
     justify-content: space-between; position: sticky; top: 0; z-index: 50; 
   }
-  .nav-title { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; }
-  
-  /* Списки iOS */
+
   .ios-list { background: var(--card-bg); margin: 16px; border-radius: 12px; overflow: hidden; }
   .ios-item { 
     display: flex; align-items: center; padding: 12px 16px; cursor: pointer; 
-    transition: background 0.2s; border: none; background: none; text-align: left; 
-    width: 100%; color: var(--text-main); position: relative; 
-  }
-  .ios-item:active { background: ${isDark ? '#2C2C2E' : '#E5E5EA'}; }
-  .ios-item:not(:last-child)::after { 
-    content: ''; position: absolute; left: 70px; right: 0; bottom: 0; height: 0.5px; background: var(--sep); 
+    border: none; background: none; text-align: left; width: 100%; color: var(--text-main); 
   }
 
-  /* Чат */
-  .chat-scroll { 
-    flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; 
-    background: ${isDark ? '#000' : '#F2F2F7'}; 
-  }
   .chat-bubble { 
     max-width: 75%; padding: 10px 14px; border-radius: 18px; font-size: 16px; 
-    position: relative; word-wrap: break-word; line-height: 1.4; margin-bottom: 4px; 
-    animation: bubblePop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    position: relative; word-wrap: break-word; margin-bottom: 4px; 
   }
-  @keyframes bubblePop { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
   .bubble-me { background: var(--ios-blue); color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
   .bubble-other { background: ${isDark ? '#1C1C1E' : '#FFFFFF'}; color: var(--text-main); align-self: flex-start; border-bottom-left-radius: 4px; }
 
-  /* Нижнее меню - ФИКСИРОВАННОЕ */
+  .circle-video { width: 220px; height: 220px; border-radius: 50%; object-fit: cover; border: 3px solid var(--ios-blue); overflow: hidden; }
+  
+  .reaction-badge {
+    position: absolute; bottom: -10px; right: 10px; background: var(--card-bg); 
+    border-radius: 10px; padding: 2px 6px; font-size: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    display: flex; gap: 2px;
+  }
+
+  .reaction-picker {
+    position: absolute; background: var(--card-bg); border-radius: 20px; 
+    padding: 8px 12px; box-shadow: 0 5px 20px rgba(0,0,0,0.3); display: flex; gap: 10px;
+    z-index: 100; transform: translateY(-50px); animation: pop 0.2s ease-out;
+  }
+  @keyframes pop { from { transform: scale(0.5) translateY(0); } to { transform: scale(1) translateY(-50px); } }
+
   .tab-bar { 
     height: 85px; background: var(--nav-bg); backdrop-filter: blur(25px); 
     border-top: 0.5px solid var(--sep); display: flex; justify-content: space-around; 
-    padding-top: 10px; flex-shrink: 0;
+    padding-top: 10px; flex-shrink: 0; z-index: 100;
   }
-  .tab-item { 
-    display: flex; flex-direction: column; align-items: center; gap: 4px; 
-    color: var(--text-sec); cursor: pointer; border: none; background: none; 
-  }
-  .tab-item.active { color: var(--ios-blue); }
 
-  /* Уведомление внутри приложения */
-  .toast {
-    position: absolute; top: 60px; left: 16px; right: 16px; background: var(--card-bg); 
-    padding: 12px 16px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-    display: flex; align-items: center; gap: 12px; z-index: 999;
-    animation: toastIn 0.4s ease forwards;
-  }
-  @keyframes toastIn { from { transform: translateY(-100px); } to { transform: translateY(0); } }
-
-  .voice-record-btn {
-    width: 40px; height: 40px; border-radius: 50%; display: flex; 
-    align-items: center; justify-content: center; background: #FF3B30; color: white;
-    animation: pulse 1.5s infinite;
-  }
-  @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+  /* Исправление бага с аватаром */
+  .avatar { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 0.5px solid var(--sep); }
+  .avatar-huge { width: 120px; height: 120px; border-radius: 50%; object-fit: cover; margin: 0 auto 15px; border: 3px solid var(--ios-blue); display: block; }
 `;
 
 export default function App() {
@@ -161,26 +132,24 @@ export default function App() {
   const [isDark, setIsDark] = useState(localStorage.getItem('aura_dark') === 'true');
   const [view, setView] = useState('chats');
   const [selectedPeer, setSelectedPeer] = useState(null);
-
   const [allUsers, setAllUsers] = useState([]);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
-  const [search, setSearch] = useState('');
   const [formData, setFormData] = useState({ username: '', password: '', name: '', bio: '' });
   const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
   const [authStep, setAuthStep] = useState('login');
+  const [activeReactionId, setActiveReactionId] = useState(null);
 
-  // Голос и Уведомления
-  const [isRecording, setIsRecording] = useState(false);
-  const [toast, setToast] = useState(null);
+  // Кружочки и Голос
+  const [isRecording, setIsRecording] = useState(null); // 'voice' or 'video'
   const [recTime, setRecTime] = useState(0);
+  const [videoPreview, setVideoPreview] = useState(null);
 
   const scrollRef = useRef();
   const mediaRecorder = useRef(null);
+  const videoRef = useRef(null);
   const audioChunks = useRef([]);
 
-  // 1. Инициализация и Auth
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -189,7 +158,6 @@ export default function App() {
         } else { await signInAnonymously(auth); }
       } catch (e) { console.error(e); }
     };
-
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setFirebaseUser(u);
       if (u) {
@@ -200,137 +168,110 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Синхронизация данных и Real-time уведомления
   useEffect(() => {
     if (!firebaseUser) return;
-
-    const unsubUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (s) => {
+    onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (s) => {
       setAllUsers(s.docs.map(d => ({ id: d.id, ...d.data() })));
     });
-
-    const unsubMsgs = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (s) => {
-      const msgsData = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.ts - b.ts);
-
-      // Логика уведомлений для новых сообщений
-      if (messages.length > 0 && msgsData.length > messages.length) {
-        const lastMsg = msgsData[msgsData.length - 1];
-        if (lastMsg.uid !== user?.username && (lastMsg.to === user?.username || lastMsg.to === 'global')) {
-          showNotification(lastMsg);
-        }
-      }
-      setMessages(msgsData);
+    onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (s) => {
+      setMessages(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.ts - b.ts));
     });
-
-    return () => { unsubUsers(); unsubMsgs(); };
-  }, [firebaseUser, messages.length, user?.username]);
-
-  // 3. Автоматическая пометка прочитанным
-  useEffect(() => {
-    if (view === 'chat_room' && selectedPeer && user && selectedPeer.username !== 'global') {
-      const unread = messages.filter(m => m.uid === selectedPeer.username && m.to === user.username && !m.read);
-      unread.forEach(async (msg) => {
-        const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'messages', msg.id);
-        await updateDoc(msgRef, { read: true });
-      });
-    }
-  }, [view, selectedPeer, messages, user]);
+  }, [firebaseUser]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, view, selectedPeer]);
 
-  const showNotification = (msg) => {
-    // Внутренний тост
-    if (view !== 'chat_room' || selectedPeer?.username !== msg.uid) {
-      setToast({ name: msg.name, text: msg.type === 'voice' ? '🎙 Голосовое сообщение' : msg.text });
-      setTimeout(() => setToast(null), 3000);
-
-      // Браузерное уведомление
-      if (Notification.permission === 'granted') {
-        new Notification(`Aura: ${msg.name}`, { body: msg.text, icon: 'https://cdn-icons-png.flaticon.com/512/733/733579.png' });
-      }
-    }
-  };
-
   const handleAuth = async () => {
     const { username, password, name } = formData;
-    if (!username || !password) return setErrorMsg("Заполните поля");
-    setLoading(true); setErrorMsg('');
+    if (!username || !password) return;
+    setLoading(true);
     try {
       const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', username.toLowerCase().trim());
       const snap = await getDoc(userRef);
       if (authStep === 'reg') {
-        if (snap.exists()) { setLoading(false); return setErrorMsg("Логин занят"); }
+        if (snap.exists()) return setLoading(false);
         const newUser = {
           username: username.toLowerCase().trim(), password, name: name || username,
           avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`,
           bio: 'В Aura'
         };
         await setDoc(userRef, newUser);
-        loginSuccess(newUser);
+        setUser(newUser); localStorage.setItem('aura_user', JSON.stringify(newUser));
       } else {
-        if (!snap.exists() || snap.data().password !== password) { setLoading(false); return setErrorMsg("Ошибка входа"); }
-        loginSuccess(snap.data());
+        if (snap.exists() && snap.data().password === password) {
+          setUser(snap.data()); localStorage.setItem('aura_user', JSON.stringify(snap.data()));
+        }
       }
-    } catch (e) { setErrorMsg("Ошибка базы данных"); setLoading(false); }
-  };
-
-  const loginSuccess = (u) => {
-    setUser(u);
-    localStorage.setItem('aura_user', JSON.stringify(u));
-    setLoading(false);
-  };
-
-  const updateProfile = async () => {
-    if (!user) return;
-    setLoading(true);
-    try {
-      const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.username);
-      const updates = { name: formData.name || user.name, bio: formData.bio || user.bio };
-      await updateDoc(userRef, updates);
-      const updatedUser = { ...user, ...updates };
-      setUser(updatedUser);
-      localStorage.setItem('aura_user', JSON.stringify(updatedUser));
-      setView('settings');
     } catch (e) { console.error(e); }
     setLoading(false);
   };
 
+  const updateProfile = async (updates) => {
+    if (!user) return;
+    const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.username);
+    await updateDoc(userRef, updates);
+    const updatedUser = { ...user, ...updates };
+    setUser(updatedUser);
+    localStorage.setItem('aura_user', JSON.stringify(updatedUser));
+  };
+
+  const onAvatarChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => updateProfile({ avatar: reader.result });
+    reader.readAsDataURL(file);
+  };
+
   const sendMessage = async (val, type = 'text') => {
     if (!val.trim() && type === 'text') return;
-    if (!user || !selectedPeer) return;
     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
-      text: val, uid: user.username, to: selectedPeer.username, ts: Date.now(), name: user.name, read: false, type
+      text: val, uid: user.username, to: selectedPeer.username, ts: Date.now(), name: user.name, type, reactions: {}
     });
     setInput('');
   };
 
-  // Логика записи голоса
-  const startRecording = async () => {
+  const addReaction = async (msgId, emoji) => {
+    const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId);
+    const msg = messages.find(m => m.id === msgId);
+    const reactions = { ...(msg.reactions || {}) };
+    reactions[user.username] = emoji;
+    await updateDoc(msgRef, { reactions });
+    setActiveReactionId(null);
+  };
+
+  const startMediaRecording = async (type) => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: type === 'video' ? { width: 400, height: 400, facingMode: 'user' } : false
+      });
+      if (type === 'video' && videoRef.current) videoRef.current.srcObject = stream;
+
       mediaRecorder.current = new MediaRecorder(stream);
       audioChunks.current = [];
       mediaRecorder.current.ondataavailable = e => audioChunks.current.push(e.data);
       mediaRecorder.current.onstop = () => {
-        const blob = new Blob(audioChunks.current, { type: 'audio/webm' });
+        const blob = new Blob(audioChunks.current, { type: type === 'video' ? 'video/webm' : 'audio/webm' });
         const reader = new FileReader();
+        reader.onloadend = () => sendMessage(reader.result, type === 'video' ? 'video_circle' : 'voice');
         reader.readAsDataURL(blob);
-        reader.onloadend = () => sendMessage(reader.result, 'voice');
+        stream.getTracks().forEach(t => t.stop());
       };
       mediaRecorder.current.start();
-      setIsRecording(true);
+      setIsRecording(type);
       setRecTime(0);
-      const timer = setInterval(() => setRecTime(prev => prev + 1), 1000);
-      mediaRecorder.current.onstart = () => { mediaRecorder.current.timer = timer; };
-    } catch (e) { alert("Нет доступа к микрофону"); }
+      const t = setInterval(() => setRecTime(p => p + 1), 1000);
+      mediaRecorder.current.timer = t;
+    } catch (e) { alert("Нет доступа"); }
   };
 
-  const stopRecording = () => {
+  const stopMediaRecording = () => {
     if (mediaRecorder.current) {
       mediaRecorder.current.stop();
       clearInterval(mediaRecorder.current.timer);
-      setIsRecording(false);
+      setIsRecording(null);
     }
   };
 
@@ -348,14 +289,15 @@ export default function App() {
           <div className="auth-card">
             <div style={{width: 70, height: 70, background: '#007AFF', borderRadius: 20, margin: '0 auto 20px', display: 'flex', alignItems: 'center', justifyContent: 'center'}}><MessageCircle color="white" size={36} /></div>
             <h2>{authStep === 'reg' ? 'Регистрация' : 'Вход в Aura'}</h2>
-            {errorMsg && <div className="error-msg">{errorMsg}</div>}
-            <div className="input-group"><span className="input-label">Логин</span><input className="ios-input" placeholder="ivan_aura" onChange={e => setFormData({...formData, username: e.target.value})} /></div>
-            <div className="input-group"><span className="input-label">Пароль</span><input className="ios-input" type="password" placeholder="••••••••" onChange={e => setFormData({...formData, password: e.target.value})} /></div>
-            {authStep === 'reg' && <div className="input-group"><span className="input-label">Ваше имя</span><input className="ios-input" placeholder="Александр" onChange={e => setFormData({...formData, name: e.target.value})} /></div>}
-            <button className="btn-primary" onClick={handleAuth} disabled={loading}>{loading ? '...' : 'Продолжить'}</button>
-            <button style={{background: 'none', border: 'none', color: '#007AFF', marginTop: 20, cursor: 'pointer', fontWeight: 600}} onClick={() => setAuthStep(authStep === 'reg' ? 'login' : 'reg')}>
-              {authStep === 'reg' ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Создать'}
-            </button>
+            <div style={{marginTop: 20}}>
+              <input className="ios-input" placeholder="Логин" style={{marginBottom: 10}} onChange={e => setFormData({...formData, username: e.target.value})} />
+              <input className="ios-input" type="password" placeholder="Пароль" style={{marginBottom: 10}} onChange={e => setFormData({...formData, password: e.target.value})} />
+              {authStep === 'reg' && <input className="ios-input" placeholder="Ваше имя" style={{marginBottom: 10}} onChange={e => setFormData({...formData, name: e.target.value})} />}
+              <button className="btn-primary" onClick={handleAuth} disabled={loading}>{loading ? '...' : 'Продолжить'}</button>
+              <button style={{background: 'none', border: 'none', color: '#007AFF', marginTop: 20, cursor: 'pointer', width: '100%', fontWeight: 600}} onClick={() => setAuthStep(authStep === 'reg' ? 'login' : 'reg')}>
+                {authStep === 'reg' ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Создать'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -366,114 +308,106 @@ export default function App() {
         <style>{auraStyles(isDark)}</style>
         <div className="phone-screen">
 
-          {toast && (
-              <div className="toast" onClick={() => setView('chats')}>
-                <div style={{background: '#007AFF', width: 40, height: 40, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white'}}><MessageCircle size={20}/></div>
-                <div style={{flex: 1}}><b>{toast.name}</b><div style={{fontSize: 13, opacity: 0.8}}>{toast.text}</div></div>
+          {view === 'chats' && (
+              <div className="view-container">
+                <div className="nav-bar"><div className="nav-title">Чаты</div><Edit3 size={24} color="#007AFF" /></div>
+                <div style={{padding: '0 16px 16px'}}><div style={{background: isDark ? '#1C1C1E' : '#E3E3E8', borderRadius: '12px', padding: '12px', display: 'flex', alignItems: 'center', gap: '8px'}}><Search size={18} color="#8E8E93" /><input placeholder="Поиск" style={{background: 'none', border: 'none', outline: 'none', color: 'var(--text-main)', width: '100%'}} /></div></div>
+                <div style={{flex: 1, overflowY: 'auto'}}>
+                  <button className="ios-item" onClick={() => { setSelectedPeer({name: 'Общий чат', username: 'global'}); setView('chat_room'); }}>
+                    <div style={{background: '#007AFF', width: 50, height: 50, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 14}}><Globe size={24} color="white"/></div>
+                    <div style={{flex: 1}}><b style={{fontSize: 17}}>Общий чат</b><div style={{fontSize: 14, color: 'var(--text-sec)'}}>Групповая беседа</div></div>
+                  </button>
+                  {allUsers.filter(u => u.username !== user.username).map(u => (
+                      <button key={u.username} className="ios-item" onClick={() => { setSelectedPeer(u); setView('chat_room'); }}>
+                        <img src={u.avatar} className="avatar" />
+                        <div style={{flex: 1}}><b style={{fontSize: 17}}>{u.name}</b><div style={{fontSize: 14, color: 'var(--text-sec)'}}>@{u.username}</div></div>
+                      </button>
+                  ))}
+                </div>
               </div>
           )}
 
-          <div style={{flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden'}}>
-            {view === 'chats' && (
-                <div className="view-container">
-                  <div className="nav-bar"><div className="nav-title">Чаты</div><Edit3 size={24} color="#007AFF" /></div>
-                  <div style={{padding: '0 16px 16px'}}><div style={{background: isDark ? '#1C1C1E' : '#E3E3E8', borderRadius: '12px', padding: '12px', display: 'flex', alignItems: 'center', gap: '8px'}}><Search size={18} color="#8E8E93" /><input placeholder="Поиск" style={{background: 'none', border: 'none', outline: 'none', color: 'var(--text-main)', width: '100%', fontSize: 16}} value={search} onChange={e => setSearch(e.target.value)} /></div></div>
-                  <div style={{flex: 1, overflowY: 'auto'}}>
-                    <button className="ios-item" onClick={() => { setSelectedPeer({name: 'Общий чат', username: 'global'}); setView('chat_room'); }}>
-                      <div style={{background: '#007AFF', width: 52, height: 52, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 14}}><Globe size={26} color="white"/></div>
-                      <div style={{flex: 1}}><div style={{display: 'flex', justifyContent: 'space-between'}}><b style={{fontSize: 17}}>Общий чат</b><span style={{fontSize: 12, color: 'var(--text-sec)'}}>Online</span></div><div style={{fontSize: 14, color: 'var(--text-sec)'}}>Групповая беседа</div></div>
-                      <ChevronRight size={18} color="#C6C6C8" />
-                    </button>
-                    {allUsers.filter(u => u.username !== user.username && u.username.includes(search.toLowerCase())).map(u => (
-                        <button key={u.username} className="ios-item" onClick={() => { setSelectedPeer(u); setView('chat_room'); }}>
-                          <img src={u.avatar} className="avatar" />
-                          <div style={{flex: 1}}><b style={{fontSize: 17}}>{u.name}</b><div style={{fontSize: 14, color: 'var(--text-sec)'}}>@{u.username}</div></div>
-                          <ChevronRight size={18} color="#C6C6C8" />
-                        </button>
-                    ))}
+          {view === 'settings' && (
+              <div className="view-container">
+                <div className="nav-bar"><div className="nav-title">Настройки</div></div>
+                <div className="ios-list">
+                  <div style={{padding: 20, textAlign: 'center'}}>
+                    <div style={{position: 'relative', display: 'inline-block'}}>
+                      <img src={user.avatar} className="avatar-huge" />
+                      <label style={{position: 'absolute', bottom: 15, right: 0, background: '#007AFF', borderRadius: '50%', padding: 8, cursor: 'pointer', border: '3px solid var(--card-bg)'}}>
+                        <Camera size={18} color="white" />
+                        <input type="file" hidden accept="image/*" onChange={onAvatarChange} />
+                      </label>
+                    </div>
+                    <h3 style={{fontSize: 22, fontWeight: 800}}>{user.name}</h3>
+                    <p style={{color: 'var(--text-sec)'}}>@{user.username}</p>
                   </div>
                 </div>
-            )}
-
-            {view === 'settings' && (
-                <div className="view-container">
-                  <div className="nav-bar"><div className="nav-title">Настройки</div></div>
-                  <div className="ios-list">
-                    <button className="ios-item" onClick={() => { setFormData({name: user.name, bio: user.bio}); setView('profile_edit'); }}>
-                      <img src={user.avatar} className="avatar" style={{width: 60, height: 60}} />
-                      <div style={{flex: 1}}><div style={{fontSize: 20, fontWeight: 700}}>{user.name}</div><div style={{color: 'var(--text-sec)'}}>@{user.username}</div></div>
-                      <ChevronRight size={18} color="#C6C6C8" />
-                    </button>
-                  </div>
-                  <div className="ios-list">
-                    <button className="ios-item" onClick={() => { setIsDark(!isDark); localStorage.setItem('aura_dark', !isDark); }}><div style={{background: '#5856D6', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 12, color: 'white'}}>{isDark ? <Sun size={18}/> : <Moon size={18}/>}</div><div style={{flex: 1}}>Темная тема</div><div style={{color: 'var(--text-sec)'}}>{isDark ? 'Вкл' : 'Выкл'}</div></button>
-                    <button className="ios-item" onClick={() => Notification.requestPermission()}><div style={{background: '#FF9500', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 12, color: 'white'}}><Bell size={18}/></div><div style={{flex: 1}}>Уведомления</div><div style={{fontSize: 12, color: 'var(--text-sec)'}}>{Notification.permission === 'granted' ? 'Вкл' : 'Выкл'}</div></button>
-                  </div>
-                  <div className="ios-list">
-                    <button className="ios-item" onClick={() => { localStorage.clear(); window.location.reload(); }}><div style={{background: '#FF3B30', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 12, color: 'white'}}><LogOut size={18}/></div><div style={{flex: 1, color: '#FF3B30', fontWeight: 600}}>Выйти</div></button>
-                  </div>
+                <div className="ios-list">
+                  <button className="ios-item" onClick={() => { setIsDark(!isDark); localStorage.setItem('aura_dark', !isDark); }}><Sun style={{marginRight: 12}} size={20}/> Темная тема</button>
+                  <button className="ios-item" onClick={() => { localStorage.clear(); window.location.reload(); }} style={{color: '#FF3B30'}}><LogOut style={{marginRight: 12}} size={20}/> Выйти</button>
                 </div>
-            )}
+              </div>
+          )}
 
-            {view === 'profile_edit' && (
-                <div className="view-container">
-                  <div className="nav-bar"><button onClick={() => setView('settings')} style={{background: 'none', border: 'none', color: '#007AFF', display: 'flex', alignItems: 'center', cursor: 'pointer'}}><ChevronLeft size={30}/></button><div style={{fontWeight: 700}}>Изменить профиль</div><button onClick={updateProfile} style={{background: 'none', border: 'none', color: '#007AFF', fontWeight: 600}}>{loading ? '...' : 'Готово'}</button></div>
-                  <div style={{textAlign: 'center', padding: 30}}><img src={user.avatar} style={{width: 100, height: 100, borderRadius: '50%', marginBottom: 15, border: '2px solid var(--ios-blue)'}}/><div style={{color: '#007AFF', fontSize: 14, fontWeight: 600}}>Изменить аватар</div></div>
-                  <div className="ios-list">
-                    <div className="ios-item"><input className="ios-input" style={{border: 'none', padding: 0}} value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Имя" /></div>
-                    <div className="ios-item"><input className="ios-input" style={{border: 'none', padding: 0}} value={formData.bio} onChange={e => setFormData({...formData, bio: e.target.value})} placeholder="О себе" /></div>
-                  </div>
+          {view === 'chat_room' && (
+              <div className="view-container">
+                <div className="nav-bar">
+                  <button onClick={() => setView('chats')} style={{background: 'none', border: 'none', color: '#007AFF'}}><ChevronLeft size={34} /></button>
+                  <div style={{textAlign: 'center'}}><b style={{fontSize: 17}}>{selectedPeer.name}</b><div style={{fontSize: 11, color: '#34C759'}}>в сети</div></div>
+                  <img src={selectedPeer.avatar || ''} className="avatar" style={{width: 36, height: 36}} />
                 </div>
-            )}
 
-            {view === 'chat_room' && selectedPeer && (
-                <div className="view-container" style={{display: 'flex', flexDirection: 'column', height: '100%'}}>
-                  <div className="nav-bar">
-                    <button onClick={() => setView('chats')} style={{background: 'none', border: 'none', color: '#007AFF', display: 'flex', alignItems: 'center'}}><ChevronLeft size={34} /><span style={{fontSize: 17}}>Назад</span></button>
-                    <div style={{textAlign: 'center'}}><b style={{fontSize: 17}}>{selectedPeer.name}</b><div style={{fontSize: 11, color: '#34C759', fontWeight: 600}}>в сети</div></div>
-                    {selectedPeer.avatar ? <img src={selectedPeer.avatar} style={{width: 36, height: 36, borderRadius: '50%'}}/> : <div style={{width: 36}}></div>}
-                  </div>
+                <div ref={scrollRef} className="chat-scroll">
+                  <div style={{flex: 1}}></div>
+                  {currentMessages.map((m) => (
+                      <div key={m.id} className={`chat-bubble ${m.uid === user.username ? 'bubble-me' : 'bubble-other'}`} onClick={() => setActiveReactionId(m.id)}>
+                        {m.type === 'video_circle' ? (
+                            <video src={m.text} controls className="circle-video" />
+                        ) : m.type === 'voice' ? (
+                            <audio src={m.text} controls style={{width: 180}} />
+                        ) : <div>{m.text}</div>}
 
-                  <div ref={scrollRef} className="chat-scroll">
-                    <div style={{flex: 1}}></div>
-                    {currentMessages.map((m, i) => (
-                        <div key={m.id || i} className={`chat-bubble ${m.uid === user.username ? 'bubble-me' : 'bubble-other'}`}>
-                          {selectedPeer.username === 'global' && m.uid !== user.username && <div style={{fontSize: 11, fontWeight: 700, marginBottom: 2, color: '#FF9500'}}>{m.name}</div>}
-                          {m.type === 'voice' ? <audio src={m.text} controls style={{width: 200, height: 35, marginTop: 5}} /> : <div>{m.text}</div>}
-                          <div style={{display: 'flex', justifyContent: 'flex-end', gap: 4, marginTop: 2}}>
-                            <span style={{fontSize: 10, opacity: 0.6}}>{m.ts ? new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}</span>
-                            {m.uid === user.username && selectedPeer.username !== 'global' && (m.read ? <CheckCheck size={12} color="#34C759"/> : <Check size={12} color="#FFF"/>)}
-                          </div>
-                        </div>
-                    ))}
-                  </div>
+                        {activeReactionId === m.id && (
+                            <div className="reaction-picker">
+                              {['❤️', '👍', '🔥', '😂'].map(e => <span key={e} onClick={() => addReaction(m.id, e)} style={{fontSize: 20, cursor: 'pointer'}}>{e}</span>)}
+                            </div>
+                        )}
 
-                  <div style={{padding: '10px 16px 35px', background: 'var(--nav-bg)', backdropFilter: 'blur(25px)', display: 'flex', gap: 10, alignItems: 'center', borderTop: '0.5px solid var(--sep)'}}>
-                    {isRecording ? (
-                        <div style={{flex: 1, display: 'flex', alignItems: 'center', background: isDark ? '#2C2C2E' : '#E5E5EA', padding: '10px 15px', borderRadius: 20, gap: 10}}>
-                          <div className="voice-record-btn"><Mic size={18}/></div>
-                          <span style={{fontWeight: 600, color: '#FF3B30'}}>{Math.floor(recTime / 60)}:{String(recTime % 60).padStart(2, '0')}</span>
-                          <div style={{flex: 1, height: 2, background: '#FF3B30', opacity: 0.3}}></div>
-                          <button onClick={stopRecording} style={{background: 'none', border: 'none', color: '#FF3B30'}}><Square size={20}/></button>
-                        </div>
-                    ) : (
-                        <>
-                          <Plus size={28} color="#007AFF" />
-                          <input style={{flex: 1, padding: '11px 16px', borderRadius: 22, border: 'none', background: isDark ? '#2C2C2E' : '#FFFFFF', color: 'var(--text-main)', fontSize: 16, outline: 'none'}} value={input} onChange={e => setInput(e.target.value)} placeholder="Сообщение" onKeyDown={e => e.key === 'Enter' && sendMessage(input)} />
-                          {input.trim() ? (
-                              <button onClick={() => sendMessage(input)} style={{background: '#007AFF', borderRadius: '50%', width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer'}}><Send size={18} color="white" /></button>
-                          ) : <button onMouseDown={startRecording} onTouchStart={startRecording} style={{background: 'none', border: 'none'}}><Mic size={26} color="#8E8E93" /></button>}
-                        </>
-                    )}
-                  </div>
+                        {m.reactions && Object.keys(m.reactions).length > 0 && (
+                            <div className="reaction-badge">
+                              {Array.from(new Set(Object.values(m.reactions))).map(emoji => <span key={emoji}>{emoji}</span>)}
+                            </div>
+                        )}
+                        <div style={{fontSize: 10, opacity: 0.5, textAlign: 'right', marginTop: 4}}>{new Date(m.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
+                      </div>
+                  ))}
                 </div>
-            )}
-          </div>
+
+                <div style={{padding: '10px 16px 35px', background: 'var(--nav-bg)', backdropFilter: 'blur(25px)', display: 'flex', gap: 10, alignItems: 'center', borderTop: '0.5px solid var(--sep)'}}>
+                  {isRecording ? (
+                      <div style={{flex: 1, display: 'flex', alignItems: 'center', background: '#FF3B30', padding: '10px 15px', borderRadius: 20, color: 'white'}}>
+                        {isRecording === 'video' && <video ref={videoRef} autoPlay muted className="circle-video" style={{width: 40, height: 40, marginRight: 10, border: 'none'}} />}
+                        <span style={{flex: 1}}>Запись {isRecording === 'video' ? 'кружочка' : 'голоса'}... {recTime}с</span>
+                        <button onClick={stopMediaRecording} style={{background: 'white', border: 'none', color: '#FF3B30', borderRadius: '50%', padding: 5}}><Square size={16}/></button>
+                      </div>
+                  ) : (
+                      <>
+                        <button onMouseDown={() => startMediaRecording('video')} onTouchStart={() => startMediaRecording('video')} style={{background: 'none', border: 'none', color: '#8E8E93'}}><Camera size={26}/></button>
+                        <input style={{flex: 1, padding: '11px 16px', borderRadius: 22, border: 'none', background: isDark ? '#2C2C2E' : '#FFFFFF', color: 'var(--text-main)', fontSize: 16}} value={input} onChange={e => setInput(e.target.value)} placeholder="Сообщение" onKeyDown={e => e.key === 'Enter' && sendMessage(input)} />
+                        {input.trim() ? (
+                            <button onClick={() => sendMessage(input)} style={{background: '#007AFF', borderRadius: '50%', width: 38, height: 38, border: 'none', color: 'white'}}><Send size={18}/></button>
+                        ) : <button onMouseDown={() => startMediaRecording('voice')} onTouchStart={() => startMediaRecording('voice')} style={{background: 'none', border: 'none', color: '#8E8E93'}}><Mic size={26}/></button>}
+                      </>
+                  )}
+                </div>
+              </div>
+          )}
 
           {view !== 'chat_room' && (
               <div className="tab-bar">
-                <button className={`tab-item ${view === 'chats' ? 'active' : ''}`} onClick={() => setView('chats')}><MessageCircle size={28} /><span style={{fontSize: 11}}>Чаты</span></button>
-                <button className={`tab-item ${view === 'settings' || view === 'profile_edit' ? 'active' : ''}`} onClick={() => setView('settings')}><UserIcon size={28} /><span style={{fontSize: 11}}>Настройки</span></button>
+                <button className={`tab-item ${view === 'chats' ? 'active' : ''}`} onClick={() => setView('chats')}><MessageCircle size={28} /><span>Чаты</span></button>
+                <button className={`tab-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}><UserIcon size={28} /><span>Настройки</span></button>
               </div>
           )}
         </div>
