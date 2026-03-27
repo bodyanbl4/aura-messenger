@@ -64,9 +64,9 @@ const auraStyles = `
   .animate-pop { animation: ios-pop 0.4s cubic-bezier(0.15, 0.9, 0.3, 1.1) forwards; }
 
   /* Фикс Аватаров */
-  .avatar-main { width: 90px; height: 90px; border-radius: 28px; margin-bottom: 20px; box-shadow: 0 8px 20px rgba(0,122,255,0.2); }
+  .avatar-main { width: 90px; height: 90px; border-radius: 28px; margin-bottom: 20px; box-shadow: 0 8px 20px rgba(0,122,255,0.2); object-fit: cover; }
   .avatar-list { width: 56px !important; height: 56px !important; border-radius: 50%; object-fit: cover; margin-right: 15px; border: 2px solid white; }
-  .avatar-small { width: 38px !important; height: 38px !important; border-radius: 50%; border: 1.5px solid white; }
+  .avatar-small { width: 38px !important; height: 38px !important; border-radius: 50%; border: 1.5px solid white; object-fit: cover; }
 
   /* Чат и сообщения */
   .chat-list { flex: 1; overflow-y: auto; padding: 10px 0; }
@@ -123,6 +123,32 @@ export default function App() {
 
   const messagesEndRef = useRef(null);
 
+  // Инициализация сессии и сохранение в память браузера
+  const initSession = (userData) => {
+    setUser(userData);
+    localStorage.setItem('aura_user', JSON.stringify(userData));
+
+    const s = io(SERVER_URL);
+    setSocket(s);
+    s.emit('user_online', userData.id);
+    fetch(`${SERVER_URL}/api/sync?userId=${userData.id}`)
+        .then(r => r.json()).then(d => d.success && setChats(d.chats))
+        .catch(e => console.error("Sync error:", e));
+  };
+
+  // Авто-вход при загрузке страницы
+  useEffect(() => {
+    const savedUser = localStorage.getItem('aura_user');
+    if (savedUser) {
+      try {
+        const parsed = JSON.parse(savedUser);
+        initSession(parsed);
+      } catch (e) {
+        localStorage.removeItem('aura_user');
+      }
+    }
+  }, []);
+
   const handleAuth = async () => {
     if (!username || !password) return setError("Заполните поля");
     setIsLoading(true); setError("");
@@ -135,15 +161,15 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success) {
-        setUser(data.user);
-        const s = io(SERVER_URL);
-        setSocket(s);
-        s.emit('user_online', data.user.id);
-        fetch(`${SERVER_URL}/api/sync?userId=${data.user.id}`)
-            .then(r => r.json()).then(d => d.success && setChats(d.chats));
+        initSession(data.user);
       } else { setError(data.error || "Доступ запрещен"); }
     } catch (e) { setError("Сервер просыпается... Подождите минуту."); }
     finally { setIsLoading(false); }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('aura_user');
+    window.location.reload();
   };
 
   useEffect(() => {
@@ -162,13 +188,12 @@ export default function App() {
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chats, activeChatId]);
 
-  // ЭКРАН ВХОДА
   if (!user) {
     return (
         <div className="screen flex-center" style={{padding: '20px'}}>
           <style>{auraStyles}</style>
           <div className="glass-card animate-pop">
-            <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=Aura&backgroundColor=007AFF`} className="avatar-main" />
+            <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=Aura&backgroundColor=007AFF`} className="avatar-main" alt="Logo" />
             <h1 style={{margin: '0 0 5px', fontSize: '32px', fontWeight: '800'}}>Aura</h1>
             <p style={{color: '#8E8E93', margin: '0 0 30px', fontWeight: '500'}}>{isRegister ? 'Регистрация iOS 26' : 'Вход в мессенджер'}</p>
 
@@ -210,12 +235,14 @@ export default function App() {
       <div className="screen">
         <style>{auraStyles}</style>
 
-        {/* СПИСОК ЧАТОВ */}
         <div className={`flex-col h-full ${activeChatId ? 'hidden' : ''}`}>
           <div className="glass-nav">
             <div className="flex-row" style={{justifyContent: 'space-between', marginBottom: '20px'}}>
               <h1 style={{margin: 0, fontSize: '34px', fontWeight: '800', letterSpacing: '-1px'}}>Чаты</h1>
-              <img src={user.avatar} className="avatar-small" alt="My avatar" />
+              <div className="flex-row" style={{gap: '12px'}}>
+                <img src={user.avatar} className="avatar-small" alt="My avatar" />
+                <LogOut size={22} color="#8E8E93" onClick={handleLogout} style={{cursor: 'pointer'}} title="Выйти" />
+              </div>
             </div>
             <div className="ios-input-group" style={{marginBottom: 0}}>
               <Search size={20} color="#A0A0A5" />
@@ -251,7 +278,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* ОКНО ЧАТА */}
         {activeChatId && activeChat && (
             <div className="screen" style={{position: 'fixed', top: 0, left: 0, zIndex: 200}}>
               <div className="glass-nav flex-row" style={{paddingTop: '50px'}}>
