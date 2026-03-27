@@ -3,103 +3,90 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const fs = require('fs');
-const https = require('https');
-
-// --- НАСТРОЙКИ TELEGRAM ---
-// Используем ваш полный исправленный токен
-const TELEGRAM_BOT_TOKEN = '7998543377:AAEIJFto2cbKxOeDP79wsEjDUH79wPFHAbo';
-const TELEGRAM_CHAT_ID = '7998543377';
-
-const PORT = 3000;
-const DB_PATH = './database.json';
+const path = require('path');
 
 const app = express();
-app.use(cors());
+
+// Настройка CORS: разрешаем запросы со всех доменов (важно для Vercel)
+app.use(cors({
+    origin: "*",
+    methods: ["GET", "POST"],
+    credentials: true
+}));
 app.use(express.json());
 
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: { origin: "*", methods: ["GET", "POST"] }
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
 });
 
-// Автоматическое создание базы данных
-if (!fs.existsSync(DB_PATH)) {
-    fs.writeFileSync(DB_PATH, JSON.stringify({ users: [], messages: [], pendingCodes: {} }));
-}
+// Используем /tmp для базы данных на Render, так как корень может быть защищен от записи
+const DB_PATH = path.join('/tmp', 'database.json');
 
-const getData = () => JSON.parse(fs.readFileSync(DB_PATH));
-const saveData = (data) => fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
+// Инициализация базы данных
+const initDB = () => {
+    if (!fs.existsSync(DB_PATH)) {
+        fs.writeFileSync(DB_PATH, JSON.stringify({ users: [], messages: [] }));
+        console.log("База данных создана в /tmp");
+    }
+};
+initDB();
 
-// Функция отправки кода в ваш Telegram
-async function sendTelegram(text) {
-    return new Promise((resolve, reject) => {
-        const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(text)}`;
-        https.get(url, (res) => {
-            let data = '';
-            res.on('data', (d) => data += d);
-            res.on('end', () => {
-                try {
-                    resolve(JSON.parse(data));
-                } catch (e) {
-                    reject(e);
-                }
-            });
-        }).on('error', reject);
-    });
-}
-
-// --- API ЭНДПОИНТЫ ---
-
-// 1. Запрос кода
-app.post('/api/auth/send-code', async (req, res) => {
-    const { phone } = req.body;
-    const code = Math.floor(1000 + Math.random() * 9000).toString();
-
-    let data = getData();
-    data.pendingCodes[phone] = code;
-    saveData(data);
-
-    console.log(`[AURA] Код для ${phone}: ${code}`);
-
+const getData = () => {
     try {
-        const result = await sendTelegram(`🔐 Aura Auth\nКод подтверждения для ${phone}:\n\n${code}`);
-        if (result.ok) {
-            res.json({ success: true });
-        } else {
-            throw new Error(result.description);
-        }
+        return JSON.parse(fs.readFileSync(DB_PATH));
     } catch (e) {
-        console.error("Ошибка Telegram:", e.message);
-        // В случае ошибки API код все равно можно подсмотреть в консоли
-        res.json({ success: true, debugCode: code });
+        return { users: [], messages: [] };
     }
+};
+
+const saveData = (data) => {
+    try {
+        fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
+    } catch (e) {
+        console.error("Ошибка сохранения БД:", e);
+    }
+};
+
+// --- API ---
+
+app.get('/', (req, res) => {
+    res.send('Aura Server is Online 🚀');
 });
 
-// 2. Проверка кода
-app.post('/api/auth/verify', (req, res) => {
-    const { phone, code, name } = req.body;
+app.post('/api/auth/register', (req, res) => {
+    const { username, password, name } = req.body;
+    if (!username || !password) return res.status(400).json({ error: 'Логин и пароль обязательны' });
+
     let data = getData();
-
-    if (data.pendingCodes[phone] === code || code === '0000') {
-        delete data.pendingCodes[phone];
-        let user = data.users.find(u => u.phone === phone);
-        if (!user) {
-            user = {
-                id: 'u_' + Date.now(),
-                phone,
-                name: name || 'Aura User',
-                avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${phone}&backgroundColor=007AFF`
-            };
-            data.users.push(user);
-        }
-        saveData(data);
-        res.json({ success: true, user });
-    } else {
-        res.status(400).json({ success: false, error: 'Wrong code' });
+    if (data.users.find(u => u.username === username)) {
+        return res.status(400).json({ error: 'Этот логин уже занят' });
     }
+
+    const newUser = {
+        id: 'u_' + Date.now(),
+        username,
+        password,
+        name: name || username,
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}&backgroundColor=007AFF`
+    };
+
+    data.users.push(newUser);
+    saveData(data);
+    res.json({ success: true, user: newUser });
 });
 
-// 3. Синхронизация чатов
+app.post('/api/auth/login', (req, res) => {
+    const { username, password } = req.body;
+    let data = getData();
+    const user = data.users.find(u => u.username === username && u.password === password);
+    if (user) res.json({ success: true, user });
+    else res.status(401).json({ success: false, error: 'Неверный логин или пароль' });
+});
+
 app.get('/api/sync', (req, res) => {
     const { userId } = req.query;
     const data = getData();
@@ -114,31 +101,38 @@ app.get('/api/sync', (req, res) => {
     res.json({ success: true, chats });
 });
 
-// --- REAL-TIME (SOCKETS) ---
+// --- SOCKETS ---
 const connectedUsers = new Map();
+
 io.on('connection', (socket) => {
-    socket.on('user_online', (id) => {
-        connectedUsers.set(id, socket.id);
-        io.emit('status_update', { userId: id, status: 'online' });
+    socket.on('user_online', (userId) => {
+        connectedUsers.set(userId, socket.id);
     });
 
     socket.on('send_msg', (msg) => {
         let data = getData();
         const newMsg = {
             ...msg,
-            id: 'm_'+Date.now(),
-            timestamp: Date.now(),
-            time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
+            id: 'm_' + Date.now(),
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
         data.messages.push(newMsg);
         saveData(data);
 
-        const recId = connectedUsers.get(msg.receiverId);
-        if (recId) io.to(recId).emit('new_msg', newMsg);
+        const receiverSocketId = connectedUsers.get(msg.receiverId);
+        if (receiverSocketId) io.to(receiverSocketId).emit('new_msg', newMsg);
         socket.emit('msg_delivered', newMsg);
+    });
+
+    socket.on('disconnect', () => {
+        for (let [uid, sid] of connectedUsers.entries()) {
+            if (sid === socket.id) { connectedUsers.delete(uid); break; }
+        }
     });
 });
 
+// КРИТИЧНО ДЛЯ RENDER: слушаем порт из process.env.PORT
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Aura Server запущен: http://localhost:${PORT}`);
+    console.log(`🚀 Aura Server Live on port ${PORT}`);
 });
