@@ -4,12 +4,12 @@ import {
   getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken
 } from 'firebase/auth';
 import {
-  getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc
+  getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc, query, where
 } from 'firebase/firestore';
 import {
   Search, MessageCircle, ChevronLeft, Send, User as UserIcon, LogOut, Moon,
   Camera, ChevronRight, Globe, Edit3, Mic, Check, CheckCheck, Paperclip,
-  Trash, Trash2, Pin, Smile, Forward, Phone, Video, X
+  Trash, Trash2, Pin, Smile, Forward, Phone, Video, X, PhoneMissed, PhoneIncoming
 } from 'lucide-react';
 
 // --- 🔑 КОНФИГУРАЦИЯ FIREBASE ---
@@ -24,10 +24,17 @@ const firebaseConfig = {
 };
 
 const envConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : firebaseConfig;
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'aura-pro-v27';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'aura-pro-v28';
 const app = !getApps().length ? initializeApp(envConfig) : getApps()[0];
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+// WebRTC STUN серверы для P2P соединения
+const rtcServers = {
+  iceServers: [
+    { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] }
+  ]
+};
 
 // Анимированные стикеры (Стилизованы под 3D)
 const ANIMATED_STICKERS = [
@@ -37,8 +44,8 @@ const ANIMATED_STICKERS = [
   'https://fonts.gstatic.com/s/e/notoemoji/latest/1f60e/512.gif',
   'https://fonts.gstatic.com/s/e/notoemoji/latest/1f973/512.gif',
   'https://fonts.gstatic.com/s/e/notoemoji/latest/1f44d/512.gif',
-  'https://fonts.gstatic.com/s/e/notoemoji/latest/1f92f/512.gif', // Взрыв мозга
-  'https://fonts.gstatic.com/s/e/notoemoji/latest/1f47d/512.gif', // Пришелец
+  'https://fonts.gstatic.com/s/e/notoemoji/latest/1f92f/512.gif',
+  'https://fonts.gstatic.com/s/e/notoemoji/latest/1f47d/512.gif',
 ];
 
 const auraStyles = (isDark) => `
@@ -49,7 +56,7 @@ const auraStyles = (isDark) => `
     --text-main: ${isDark ? '#FFFFFF' : '#000000'};
     --text-sec: #8E8E93;
     --sep: ${isDark ? '#38383A' : '#C6C6C8'};
-    --nav-bg: ${isDark ? 'rgba(28, 28, 30, 0.75)' : 'rgba(255, 255, 255, 0.75)'};
+    --nav-bg: ${isDark ? 'rgba(28, 28, 30, 0.85)' : 'rgba(255, 255, 255, 0.85)'};
     --bubble-me: var(--ios-blue);
     --bubble-me-text: #FFFFFF;
   }
@@ -94,7 +101,7 @@ const auraStyles = (isDark) => `
   
   .sticker-img-3d { 
     width: 120px; height: 120px; object-fit: contain; animation: popIn 0.4s; 
-    filter: drop-shadow(0 12px 15px rgba(0,0,0,0.4)) saturate(1.3) contrast(1.1); 
+    filter: drop-shadow(0 12px 20px rgba(0,0,0,0.4)) saturate(1.4) contrast(1.15); 
   }
   
   .attachment-img { max-width: 240px; max-height: 300px; border-radius: 12px; object-fit: cover; display: block; }
@@ -121,24 +128,27 @@ const auraStyles = (isDark) => `
   .akashi-glow { position: absolute; inset: 0; background: rgba(220,38,38,0.25); filter: blur(15px); border-radius: 50%; }
 
   .call-ring { position: absolute; inset: 0; border-radius: 50%; background: var(--ios-blue); z-index: 0; animation: callPulse 2s infinite ease-out; }
+
+  .local-video-pip { position: absolute; bottom: 120px; right: 20px; width: 100px; height: 140px; border-radius: 16px; overflow: hidden; box-shadow: 0 5px 20px rgba(0,0,0,0.4); border: 2px solid rgba(255,255,255,0.2); z-index: 10000; background: #000; animation: popIn 0.5s ease; }
+  .local-video-pip video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
 `;
 
 export default function App() {
   const [firebaseUser, setFirebaseUser] = useState(null);
   const [user, setUser] = useState(null);
   const [isDark, setIsDark] = useState(localStorage.getItem('aura_dark') === 'true');
-  const [view, setView] = useState('chats');
+  const [view, setView] = useState('chats'); // 'chats', 'calls', 'settings', 'chat_room'
   const [selectedPeer, setSelectedPeer] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [callLogs, setCallLogs] = useState([]); // История звонков
   const [input, setInput] = useState('');
-  const [searchQuery, setSearchQuery] = useState(''); // Стейт для поиска по нику
+  const [searchQuery, setSearchQuery] = useState('');
   const [formData, setFormData] = useState({ username: '', password: '', name: '' });
   const [loading, setLoading] = useState(false);
   const [authStep, setAuthStep] = useState('login');
   const [globalError, setGlobalError] = useState(null);
 
-  // Состояния
   const [mode, setMode] = useState('voice');
   const [isRecording, setIsRecording] = useState(null);
   const [recTime, setRecTime] = useState(0);
@@ -146,8 +156,9 @@ export default function App() {
   const [showStickers, setShowStickers] = useState(false);
   const [forwardMsg, setForwardMsg] = useState(null);
 
-  // Состояния звонка
-  const [activeCall, setActiveCall] = useState(null);
+  // --- ЗВОНКИ (WebRTC состояния) ---
+  const [activeCall, setActiveCall] = useState(null); // Текущий исходящий/активный звонок
+  const [incomingCall, setIncomingCall] = useState(null); // Входящий вызов
   const [callDuration, setCallDuration] = useState(0);
 
   const scrollRef = useRef();
@@ -155,14 +166,19 @@ export default function App() {
   const avatarInputRef = useRef(null);
   const mediaRecorder = useRef(null);
   const videoPreviewRef = useRef(null);
-  const callVideoRef = useRef(null);
   const audioChunks = useRef([]);
-  const activeStream = useRef(null);
-  const callStream = useRef(null);
+
+  const activeStream = useRef(null); // Стрим для кружков и локальной камеры звонка
+  const remoteStream = useRef(null); // Стрим собеседника
+  const peerConnection = useRef(null); // WebRTC RTCPeerConnection
+  const callVideoRef = useRef(null); // Видео собеседника
+  const localVideoRef = useRef(null); // PIP видео (свое)
+  const remoteAudioRef = useRef(null); // Аудио собеседника
+
   const pressTimer = useRef(null);
   const callTimer = useRef(null);
   const isHolding = useRef(false);
-  const lastTapRef = useRef(0); // Используем ref для безопасного хранения времени клика
+  const lastTapRef = useRef(0);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -197,49 +213,41 @@ export default function App() {
     const unsubM = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (s) => {
       setMessages(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.ts - b.ts));
     });
-    return () => { unsubU(); unsubM(); };
+    const unsubLogs = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_logs'), (s) => {
+      setCallLogs(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.ts - a.ts));
+    });
+    return () => { unsubU(); unsubM(); unsubLogs(); };
   }, [firebaseUser, user?.username]);
 
+  // Слушатель входящих звонков
   useEffect(() => {
-    if (view === 'chat_room' && selectedPeer && selectedPeer.username !== 'global') {
-      const unread = messages.filter(m => m.to === user.username && m.uid === selectedPeer.username && !m.read);
-      unread.forEach(m => {
-        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', m.id), { read: true });
+    if (!user) return;
+    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals'), where('callee', '==', user.username), where('status', '==', 'calling'));
+    const unsubCalls = onSnapshot(q, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        const data = change.doc.data();
+        if (change.type === 'added') {
+          const callerPeer = allUsers.find(u => u.username === data.caller) || { name: data.caller, username: data.caller };
+          setIncomingCall({ id: change.doc.id, ...data, peer: callerPeer });
+        }
+        if (change.type === 'modified' && data.status !== 'calling') setIncomingCall(null);
+        if (change.type === 'removed') setIncomingCall(null);
       });
-    }
-  }, [messages, view, selectedPeer, user?.username]);
+    });
+    return () => unsubCalls();
+  }, [user, allUsers]);
 
+  // Привязка стримов при звонке
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages, view, selectedPeer, showStickers]);
-
-  useEffect(() => {
-    if (activeStream.current && videoPreviewRef.current && isRecording === 'video') {
-      videoPreviewRef.current.srcObject = activeStream.current;
-      videoPreviewRef.current.onloadedmetadata = () => videoPreviewRef.current.play().catch(console.error);
-    }
-  }, [isRecording]);
-
-  useEffect(() => {
-    if (activeCall?.status === 'connected' && activeCall.type === 'video') {
-      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true })
-          .then(stream => {
-            callStream.current = stream;
-            if (callVideoRef.current) {
-              callVideoRef.current.srcObject = stream;
-              callVideoRef.current.play();
-            }
-          }).catch(e => console.error("Video Call Error:", e));
-    }
     if (activeCall?.status === 'connected') {
-      callTimer.current = setInterval(() => setCallDuration(p => p + 1), 1000);
-    }
-    return () => {
-      if (callStream.current && (!activeCall || activeCall.status !== 'connected')) {
-        callStream.current.getTracks().forEach(t => t.stop()); callStream.current = null;
+      if (activeCall.type === 'video') {
+        if (localVideoRef.current && activeStream.current) localVideoRef.current.srcObject = activeStream.current;
+        if (callVideoRef.current && remoteStream.current) callVideoRef.current.srcObject = remoteStream.current;
       }
-      clearInterval(callTimer.current);
-    };
+      if (activeCall.type === 'voice') {
+        if (remoteAudioRef.current && remoteStream.current) remoteAudioRef.current.srcObject = remoteStream.current;
+      }
+    }
   }, [activeCall?.status, activeCall?.type]);
 
   const showError = (msg) => { setGlobalError(msg); setTimeout(() => setGlobalError(null), 3000); };
@@ -317,21 +325,17 @@ export default function App() {
     } catch (e) { showError("Ошибка отправки."); }
   };
 
-  // Логика двойного тапа (Установка и Снятие реакции)
   const handleDoubleTap = (e, m) => {
     const now = Date.now();
     if (now - lastTapRef.current < 300) {
       e.preventDefault();
       const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'messages', m.id);
       const currentReactions = { ...(m.reactions || {}) };
-
-      // Если реакция от нас уже есть - удаляем, если нет - ставим
       if (currentReactions[user.username]) {
         delete currentReactions[user.username];
       } else {
         currentReactions[user.username] = '❤️';
       }
-
       updateDoc(msgRef, { reactions: currentReactions });
     }
     lastTapRef.current = now;
@@ -359,101 +363,144 @@ export default function App() {
     closeContextMenu();
   };
 
-  const togglePinMessage = async () => {
-    if (!contextMenu || contextMenu.type !== 'message') return;
-    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', contextMenu.item.id), { isPinned: !contextMenu.item.isPinned });
-    closeContextMenu();
-  };
-
-  const togglePinChat = async () => {
-    if (!contextMenu || contextMenu.type !== 'chat') return;
-    const peerUsername = contextMenu.item.username;
-    const currentPinned = user.pinnedChats || [];
-    const isPinned = currentPinned.includes(peerUsername);
-    const newPinned = isPinned ? currentPinned.filter(u => u !== peerUsername) : [...currentPinned, peerUsername];
-    await updateProfile({ pinnedChats: newPinned });
-    closeContextMenu();
-  };
-
-  const handleForwardStart = () => {
-    setForwardMsg(contextMenu.item);
-    setView('chats');
-    closeContextMenu();
-  };
-
-  const handlePlayCircle = (e, m) => {
-    const video = e.target;
-    if (video.paused) { video.play(); } else { video.pause(); }
-    if (!m.watched && m.uid !== user.username) {
-      updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', m.id), { watched: true });
-    }
-  };
-
-  const startCall = (type) => {
-    setActiveCall({ type, peer: selectedPeer, status: 'calling' });
-    setCallDuration(0);
-    setTimeout(() => { setActiveCall(prev => prev ? { ...prev, status: 'connected' } : null); }, 2500);
-  };
-  const endCall = () => { setActiveCall(null); setCallDuration(0); clearInterval(callTimer.current); };
-
-  const startMediaRecording = async (type) => {
+  // --- ЛОГИКА ЗВОНКОВ (WEBRTC + FIRESTORE SIGNALING) ---
+  const startCall = async (type) => {
     try {
-      const constraints = { audio: true, video: type === 'video' ? { facingMode: 'user', width: 400, height: 400 } : false };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: type === 'video' ? { facingMode: 'user' } : false });
       activeStream.current = stream;
-      const options = { mimeType: type === 'video' ? 'video/webm;codecs=vp8' : 'audio/webm' };
-      mediaRecorder.current = new MediaRecorder(stream, options);
-      audioChunks.current = [];
-      mediaRecorder.current.ondataavailable = e => { if (e.data.size > 0) audioChunks.current.push(e.data); };
-      mediaRecorder.current.onstop = () => {
-        if (mediaRecorder.current.cancelRecord) { stream.getTracks().forEach(t => t.stop()); activeStream.current = null; return; }
-        const blob = new Blob(audioChunks.current, { type: type === 'video' ? 'video/webm' : 'audio/webm' });
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          sendMessage(reader.result, type === 'video' ? 'video_circle' : 'voice');
-          stream.getTracks().forEach(t => t.stop()); activeStream.current = null;
-        };
-        reader.readAsDataURL(blob);
+
+      const pc = new RTCPeerConnection(rtcServers);
+      peerConnection.current = pc;
+
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+      pc.ontrack = (event) => {
+        remoteStream.current = event.streams[0];
+        if (callVideoRef.current && type === 'video') callVideoRef.current.srcObject = event.streams[0];
+        if (remoteAudioRef.current && type === 'voice') remoteAudioRef.current.srcObject = event.streams[0];
       };
-      mediaRecorder.current.start();
-      setIsRecording(type); setRecTime(0);
-      mediaRecorder.current.timer = setInterval(() => setRecTime(p => p + 1), 1000);
-    } catch (e) { showError("Нет доступа к камере или микрофону"); }
+
+      const callDocRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals'));
+      const callId = callDocRef.id;
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'callerCandidates'), event.candidate.toJSON());
+        }
+      };
+
+      const offerDescription = await pc.createOffer();
+      await pc.setLocalDescription(offerDescription);
+
+      await setDoc(callDocRef, {
+        caller: user.username, callee: selectedPeer.username, type,
+        offer: { type: offerDescription.type, sdp: offerDescription.sdp },
+        status: 'calling', ts: Date.now()
+      });
+
+      setActiveCall({ id: callId, type, peer: selectedPeer, status: 'calling', isCaller: true });
+
+      // Ждем ответа
+      onSnapshot(callDocRef, (snapshot) => {
+        const data = snapshot.data();
+        if (!data) return;
+        if (!pc.currentRemoteDescription && data.answer) {
+          pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+          setActiveCall(prev => ({...prev, status: 'connected'}));
+          callTimer.current = setInterval(() => setCallDuration(p => p + 1), 1000);
+        }
+        if (data.status === 'ended' || data.status === 'declined') endCallLocal();
+      });
+
+      // Слушаем ICE кандидатов собеседника
+      onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'calleeCandidates'), (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+        });
+      });
+
+    } catch (e) { showError("Нет доступа к камере/микрофону для звонка"); }
   };
 
-  const stopMediaRecording = () => {
-    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
-      mediaRecorder.current.stop(); clearInterval(mediaRecorder.current.timer); setIsRecording(null);
+  const answerCall = async () => {
+    if (!incomingCall) return;
+    const { id: callId, type, offer, peer } = incomingCall;
+    setIncomingCall(null);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: type === 'video' ? { facingMode: 'user' } : false });
+      activeStream.current = stream;
+
+      const pc = new RTCPeerConnection(rtcServers);
+      peerConnection.current = pc;
+
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+      pc.ontrack = (event) => {
+        remoteStream.current = event.streams[0];
+        if (callVideoRef.current && type === 'video') callVideoRef.current.srcObject = event.streams[0];
+        if (remoteAudioRef.current && type === 'voice') remoteAudioRef.current.srcObject = event.streams[0];
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'calleeCandidates'), event.candidate.toJSON());
+        }
+      };
+
+      const callDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId);
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answerDescription = await pc.createAnswer();
+      await pc.setLocalDescription(answerDescription);
+
+      await updateDoc(callDocRef, { answer: { type: answerDescription.type, sdp: answerDescription.sdp }, status: 'connected' });
+      setActiveCall({ id: callId, type, peer, status: 'connected', isCaller: false });
+      callTimer.current = setInterval(() => setCallDuration(p => p + 1), 1000);
+
+      onSnapshot(callDocRef, (snapshot) => {
+        if (snapshot.data()?.status === 'ended') endCallLocal();
+      });
+
+      onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'callerCandidates'), (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+        });
+      });
+    } catch (e) { showError("Ошибка при ответе на звонок"); }
+  };
+
+  const declineCall = async () => {
+    if (!incomingCall) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'call_signals', incomingCall.id), { status: 'declined' });
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_logs'), {
+      caller: incomingCall.caller, callee: user.username, type: incomingCall.type, status: 'missed', ts: Date.now(), duration: 0
+    });
+    setIncomingCall(null);
+  };
+
+  const endCall = async () => {
+    if (activeCall) {
+      const status = activeCall.status === 'calling' ? 'missed' : 'ended';
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'call_signals', activeCall.id), { status: 'ended' });
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_logs'), {
+        caller: activeCall.isCaller ? user.username : activeCall.peer.username,
+        callee: activeCall.isCaller ? activeCall.peer.username : user.username,
+        type: activeCall.type, status: status, ts: Date.now(), duration: callDuration
+      });
     }
+    endCallLocal();
   };
 
-  const cancelMediaRecording = () => {
-    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
-      mediaRecorder.current.cancelRecord = true; mediaRecorder.current.stop(); clearInterval(mediaRecorder.current.timer); setIsRecording(null);
-    }
+  const endCallLocal = () => {
+    if (peerConnection.current) { peerConnection.current.close(); peerConnection.current = null; }
+    if (activeStream.current) { activeStream.current.getTracks().forEach(t => t.stop()); activeStream.current = null; }
+    setActiveCall(null); setCallDuration(0); clearInterval(callTimer.current);
   };
 
-  const handlePointerDown = (e) => {
-    e.preventDefault(); isHolding.current = false;
-    pressTimer.current = setTimeout(() => { isHolding.current = true; startMediaRecording(mode); }, 300);
-  };
-  const handlePointerUp = (e) => {
-    e.preventDefault(); clearTimeout(pressTimer.current);
-    if (isHolding.current) { stopMediaRecording(); } else { setMode(prev => prev === 'voice' ? 'video' : 'voice'); }
-    isHolding.current = false;
-  };
+  // --- ХЕЛПЕРЫ ---
+  const formatTime = (seconds) => { const m = Math.floor(seconds / 60); const s = seconds % 60; return `${m}:${s < 10 ? '0' : ''}${s}`; };
+  const formatTimeOnly = (ts) => new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
 
-  const formatTime = (seconds) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
-  };
-
-  const formatTimeOnly = (ts) => {
-    return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-  };
-
-  // --- ХЕЛПЕРЫ ДЛЯ СПИСКА ЧАТОВ ---
   const getLastMessage = (peerUsername) => {
     if (peerUsername === 'global') {
       const globalMsgs = messages.filter(m => m.to === 'global' && !(m.hiddenFor || []).includes(user.username));
@@ -476,38 +523,24 @@ export default function App() {
     return 'Вложение';
   };
 
-  // Фильтрация пользователей по поиску
   const filteredUsers = allUsers.filter(u => u.username !== user.username).filter(u => {
     if (!searchQuery) return true;
-    const lowerQ = searchQuery.toLowerCase();
-    return u.name.toLowerCase().includes(lowerQ) || u.username.toLowerCase().includes(lowerQ);
+    return u.name.toLowerCase().includes(searchQuery.toLowerCase()) || u.username.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
-  // Умная сортировка отфильтрованных чатов
   const sortedUsers = filteredUsers.sort((a, b) => {
-    const aPin = user.pinnedChats?.includes(a.username);
-    const bPin = user.pinnedChats?.includes(b.username);
-    if (aPin && !bPin) return -1;
-    if (!aPin && bPin) return 1;
-
-    const msgA = getLastMessage(a.username);
-    const msgB = getLastMessage(b.username);
-    const timeA = msgA ? msgA.ts : 0;
-    const timeB = msgB ? msgB.ts : 0;
+    const aPin = user.pinnedChats?.includes(a.username); const bPin = user.pinnedChats?.includes(b.username);
+    if (aPin && !bPin) return -1; if (!aPin && bPin) return 1;
+    const timeA = getLastMessage(a.username)?.ts || 0; const timeB = getLastMessage(b.username)?.ts || 0;
     return timeB - timeA;
   });
 
-  const currentMessages = messages.filter(m => {
-    if (!selectedPeer) return false;
-    if (m.hiddenFor && m.hiddenFor.includes(user.username)) return false;
-    if (selectedPeer.username === 'global') return m.to === 'global';
-    return (m.uid === user.username && m.to === selectedPeer.username) || (m.uid === selectedPeer.username && m.to === user.username);
-  });
+  const myCallLogs = callLogs.filter(l => l.caller === user.username || l.callee === user.username);
 
+  // --- КОМПОНЕНТЫ СООБЩЕНИЙ ---
   const renderMessageContent = (m, isClone = false) => {
-    if (m.type === 'system') {
-      return <div key={m.id} className="system-bubble" style={{ margin: isClone ? 0 : '10px 0' }}>{m.text}</div>;
-    }
+    if (m.type === 'system') return <div key={m.id} className="system-bubble" style={{ margin: isClone ? 0 : '10px 0' }}>{m.text}</div>;
+
     const isMine = m.uid === user.username;
     const isSticker = m.type === 'sticker';
     const isImage = m.type === 'image';
@@ -528,12 +561,12 @@ export default function App() {
 
           {isCircle ? (
               <div className="circle-video-wrap">
-                <video src={m.text} onClick={!isClone ? (e) => handlePlayCircle(e, m) : undefined} playsInline loop={false} />
+                <video src={m.text} onClick={!isClone ? (e) => { e.target.paused ? e.target.play() : e.target.pause(); if(!m.watched && !isMine) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', m.id), { watched: true }); } : undefined} playsInline loop={false} />
                 {!isMine && !m.watched && !isClone && <div className="unread-dot"></div>}
               </div>
           ) : m.type === 'voice' ? (
               <div style={{display: 'flex', alignItems: 'center', gap: 10, minWidth: 150}}>
-                <div style={{background: isMine ? 'rgba(255,255,255,0.2)' : 'var(--ios-blue)', borderRadius: '50%', padding: 8}}><Mic size={16} color={isMine ? "white" : "white"} /></div>
+                <div style={{background: isMine ? 'rgba(255,255,255,0.2)' : 'var(--ios-blue)', borderRadius: '50%', padding: 8}}><Mic size={16} color="white" /></div>
                 <div>
                   {!isClone && <audio src={m.text} style={{display: 'none'}} id={`audio-${m.id}`} />}
                   <div style={{height: 3, width: 80, background: 'rgba(0,0,0,0.2)', borderRadius: 2, cursor: 'pointer'}} onClick={() => !isClone && document.getElementById(`audio-${m.id}`).play()}>
@@ -557,14 +590,13 @@ export default function App() {
           </div>
 
           {m.reactions && Object.keys(m.reactions).length > 0 && !isClone && (
-              <div className="reaction-badge">
-                {Array.from(new Set(Object.values(m.reactions))).join(' ')}
-              </div>
+              <div className="reaction-badge">{Array.from(new Set(Object.values(m.reactions))).join(' ')}</div>
           )}
         </div>
     );
   };
 
+  // --- ЭКРАН ВХОДА ---
   if (!user) return (
       <div className="app-container">
         <style>{auraStyles(isDark)}</style>
@@ -596,6 +628,8 @@ export default function App() {
       <div className="app-container">
         <style>{auraStyles(isDark)}</style>
         <div className="phone-screen">
+
+          {/* ПЕРЕСЫЛКА УВЕДОМЛЕНИЕ */}
           {forwardMsg && (
               <div style={{position: 'absolute', top: 0, left: 0, right: 0, background: 'var(--ios-blue)', color: 'white', padding: 10, textAlign: 'center', zIndex: 1000, fontWeight: 'bold', animation: 'slideIn 0.3s ease'}}>
                 Выберите чат для пересылки...
@@ -603,20 +637,53 @@ export default function App() {
               </div>
           )}
 
-          {/* --- ЭКРАН ЗВОНКА --- */}
+          {/* --- ЭКРАН ВХОДЯЩЕГО ЗВОНКА --- */}
+          {incomingCall && !activeCall && (
+              <div style={{position: 'absolute', inset: 0, zIndex: 10000, background: isDark ? 'rgba(28,28,30,0.95)' : 'rgba(255,255,255,0.95)', backdropFilter: 'blur(40px)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 80, paddingBottom: 60, animation: 'fadeIn 0.3s ease'}}>
+                <div style={{color: 'var(--text-main)', fontSize: 32, fontWeight: 'bold'}}>{incomingCall.peer?.name || incomingCall.caller}</div>
+                <div style={{color: 'var(--text-sec)', fontSize: 18, marginTop: 8}}>{incomingCall.type === 'video' ? 'Входящий видеозвонок...' : 'Входящий аудиозвонок...'}</div>
+
+                <div style={{flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+                  <div style={{position: 'relative', width: 160, height: 160}}>
+                    <div className="call-ring"></div>
+                    <img src={incomingCall.peer?.avatar || ''} style={{width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', position: 'relative', zIndex: 10, border: '4px solid var(--ios-blue)'}} alt="caller" />
+                  </div>
+                </div>
+
+                <div style={{display: 'flex', gap: 60, marginBottom: 20}}>
+                  <button onClick={declineCall} style={{background: '#FF3B30', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(255,59,48,0.4)', transition: 'transform 0.1s'}} onMouseDown={e => e.currentTarget.style.transform='scale(0.9)'} onMouseUp={e => e.currentTarget.style.transform='scale(1)'}>
+                    <Phone size={36} color="white" style={{transform: 'rotate(135deg)'}} />
+                  </button>
+                  <button onClick={answerCall} style={{background: '#34C759', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(52,199,89,0.4)', transition: 'transform 0.1s', animation: 'popIn 0.5s infinite alternate'}} onMouseDown={e => e.currentTarget.style.transform='scale(0.9)'} onMouseUp={e => e.currentTarget.style.transform='scale(1)'}>
+                    <Phone size={36} color="white" />
+                  </button>
+                </div>
+              </div>
+          )}
+
+          {/* --- ЭКРАН АКТИВНОГО ЗВОНКА --- */}
           {activeCall && (
               <div style={{position: 'absolute', inset: 0, zIndex: 9999, background: isDark ? 'rgba(28,28,30,0.85)' : 'rgba(255,255,255,0.85)', backdropFilter: 'blur(40px)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 60, paddingBottom: 40, animation: 'fadeIn 0.3s ease'}}>
-                <div style={{color: 'var(--text-main)', fontSize: 32, fontWeight: 'bold', textShadow: '0 2px 10px rgba(0,0,0,0.2)'}}>{activeCall.peer.name}</div>
+                <audio ref={remoteAudioRef} autoPlay />
+
+                {activeCall.type === 'video' && activeCall.status === 'connected' && (
+                    <div className="local-video-pip">
+                      <video ref={localVideoRef} autoPlay muted playsInline />
+                    </div>
+                )}
+
+                <div style={{color: 'var(--text-main)', fontSize: 32, fontWeight: 'bold', textShadow: '0 2px 10px rgba(0,0,0,0.2)'}}>{activeCall.peer?.name}</div>
                 <div style={{color: 'var(--text-main)', fontSize: 18, marginTop: 8, opacity: 0.8}}>
                   {activeCall.status === 'calling' ? 'Звонок...' : `На связи ${formatTime(callDuration)}`}
                 </div>
+
                 <div style={{flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', padding: 20}}>
                   {activeCall.type === 'video' && activeCall.status === 'connected' ? (
-                      <video ref={callVideoRef} autoPlay muted playsInline style={{width: '100%', height: '100%', objectFit: 'cover', borderRadius: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.3)', transform: 'scaleX(-1)'}} />
+                      <video ref={callVideoRef} autoPlay playsInline style={{width: '100%', height: '100%', objectFit: 'cover', borderRadius: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.3)', transform: 'scaleX(-1)'}} />
                   ) : (
                       <div style={{position: 'relative', width: 160, height: 160}}>
                         {activeCall.status === 'calling' && <div className="call-ring"></div>}
-                        <img src={activeCall.peer.avatar} style={{width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', border: '4px solid var(--ios-blue)', position: 'relative', zIndex: 10, boxShadow: '0 10px 30px rgba(0,0,0,0.3)'}} alt="caller" />
+                        <img src={activeCall.peer?.avatar} style={{width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', border: '4px solid var(--ios-blue)', position: 'relative', zIndex: 10, boxShadow: '0 10px 30px rgba(0,0,0,0.3)'}} alt="caller" />
                       </div>
                   )}
                 </div>
@@ -649,9 +716,7 @@ export default function App() {
                               <b style={{fontSize: 17}}>Общий чат</b>
                               {lastGlobal && <span style={{fontSize: 12, color: 'var(--text-sec)'}}>{formatTimeOnly(lastGlobal.ts)}</span>}
                             </div>
-                            <div style={{fontSize: 14, color: 'var(--text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>
-                              {lastGlobal ? getMessagePreview(lastGlobal) : 'Групповая беседа'}
-                            </div>
+                            <div style={{fontSize: 14, color: 'var(--text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{lastGlobal ? getMessagePreview(lastGlobal) : 'Групповая беседа'}</div>
                           </div>
                         </button>
                     );
@@ -673,12 +738,44 @@ export default function App() {
                               <b style={{fontSize: 17, display: 'flex', alignItems: 'center', gap: 5}}>{u.name} {isPinned && <Pin size={14} color="var(--text-sec)" />}</b>
                               {lastMsg && <span style={{fontSize: 12, color: 'var(--text-sec)'}}>{formatTimeOnly(lastMsg.ts)}</span>}
                             </div>
-                            <div style={{fontSize: 14, color: 'var(--text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>
-                              {lastMsg ? getMessagePreview(lastMsg) : `@${u.username}`}
-                            </div>
+                            <div style={{fontSize: 14, color: 'var(--text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{lastMsg ? getMessagePreview(lastMsg) : `@${u.username}`}</div>
                           </div>
                           <ChevronRight size={18} color="#C6C6C8" style={{marginLeft: 10, flexShrink: 0}} />
                         </button>
+                    )
+                  })}
+                </div>
+              </div>
+          )}
+
+          {/* --- ЭКРАН ИСТОРИИ ЗВОНКОВ --- */}
+          {view === 'calls' && (
+              <div className="view-container">
+                <div className="nav-bar glass-panel"><div style={{fontSize: 32, fontWeight: 800}}>Звонки</div><Phone size={24} color="var(--ios-blue)" /></div>
+                <div style={{flex: 1, overflowY: 'auto'}}>
+                  {myCallLogs.length === 0 && <div style={{textAlign: 'center', color: 'var(--text-sec)', marginTop: 40}}>Нет истории звонков</div>}
+                  {myCallLogs.map((log) => {
+                    const isIncoming = log.callee === user.username;
+                    const peerUsername = isIncoming ? log.caller : log.callee;
+                    const peer = allUsers.find(u => u.username === peerUsername) || { name: peerUsername, avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${peerUsername}` };
+                    const Icon = log.status === 'missed' ? PhoneMissed : (isIncoming ? PhoneIncoming : Phone);
+                    const color = log.status === 'missed' ? '#FF3B30' : (isIncoming ? 'var(--ios-blue)' : '#34C759');
+
+                    return (
+                        <div key={log.id} className="ios-item" style={{cursor: 'default'}}>
+                          <img src={peer.avatar} className="avatar" style={{marginRight: 14}} alt="avatar" />
+                          <div style={{flex: 1, minWidth: 0}}>
+                            <b style={{fontSize: 17, color: log.status === 'missed' ? '#FF3B30' : 'inherit'}}>{peer.name}</b>
+                            <div style={{fontSize: 14, color: 'var(--text-sec)', display: 'flex', alignItems: 'center', gap: 5, marginTop: 2}}>
+                              <Icon size={14} color={color} />
+                              {log.type === 'video' ? 'Видеозвонок' : 'Аудиозвонок'}
+                              {log.status === 'missed' && ' (Пропущенный)'}
+                            </div>
+                          </div>
+                          <div style={{textAlign: 'right'}}>
+                            <div style={{fontSize: 13, color: 'var(--text-sec)'}}>{formatTimeOnly(log.ts)}</div>
+                          </div>
+                        </div>
                     )
                   })}
                 </div>
@@ -693,9 +790,7 @@ export default function App() {
                   <div style={{textAlign: 'center', position: 'relative'}}>
                     <div style={{position: 'relative', display: 'inline-block'}}>
                       <img src={user.avatar} className="avatar-huge" onClick={() => avatarInputRef.current?.click()} alt="Profile" style={{cursor: 'pointer'}} />
-                      <div style={{position: 'absolute', bottom: 10, right: -5, background: 'var(--ios-blue)', borderRadius: '50%', padding: 6, border: '3px solid var(--card-bg)', pointerEvents: 'none'}}>
-                        <Camera size={16} color="white" />
-                      </div>
+                      <div style={{position: 'absolute', bottom: 10, right: -5, background: 'var(--ios-blue)', borderRadius: '50%', padding: 6, border: '3px solid var(--card-bg)', pointerEvents: 'none'}}><Camera size={16} color="white" /></div>
                       <input type="file" hidden ref={avatarInputRef} accept="image/*" onChange={handleAvatarChange} />
                     </div>
                     <h3 style={{fontSize: 22, fontWeight: 800, marginTop: 10}}>{user.name}</h3>
@@ -723,6 +818,7 @@ export default function App() {
               </div>
           )}
 
+          {/* --- ЭКРАН ЧАТА --- */}
           {view === 'chat_room' && selectedPeer && (
               <div className="view-container" style={{position: 'absolute', inset: 0, zIndex: 20}}>
                 <div className="nav-bar glass-panel" style={{paddingTop: 45, paddingBottom: 10, flexDirection: 'column', alignItems: 'stretch'}}>
@@ -730,8 +826,12 @@ export default function App() {
                     <button onClick={() => setView('chats')} style={{background: 'none', border: 'none', color: 'var(--ios-blue)', cursor: 'pointer', display: 'flex', alignItems: 'center'}}><ChevronLeft size={34} /></button>
                     <div style={{textAlign: 'center', flex: 1}}><b style={{fontSize: 17, display: 'block'}}>{selectedPeer.name}</b></div>
                     <div style={{display: 'flex', gap: 15, paddingRight: 5}}>
-                      <button onClick={() => startCall('voice')} style={{background:'none', border:'none', color:'var(--ios-blue)', cursor:'pointer'}}><Phone size={24}/></button>
-                      <button onClick={() => startCall('video')} style={{background:'none', border:'none', color:'var(--ios-blue)', cursor:'pointer'}}><Video size={26}/></button>
+                      {selectedPeer.username !== 'global' && (
+                          <>
+                            <button onClick={() => startCall('voice')} style={{background:'none', border:'none', color:'var(--ios-blue)', cursor:'pointer'}}><Phone size={24}/></button>
+                            <button onClick={() => startCall('video')} style={{background:'none', border:'none', color:'var(--ios-blue)', cursor:'pointer'}}><Video size={26}/></button>
+                          </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -784,6 +884,7 @@ export default function App() {
               </div>
           )}
 
+          {/* --- КОНТЕКСТНОЕ МЕНЮ БЛЮРА --- */}
           {contextMenu && (
               <div className="blur-overlay" onClick={closeContextMenu}>
                 {contextMenu.type === 'message' && (
@@ -806,9 +907,11 @@ export default function App() {
               </div>
           )}
 
+          {/* --- НИЖНЕЕ МЕНЮ (TAB BAR) --- */}
           {view !== 'chat_room' && (
               <div className="tab-bar glass-panel">
                 <button className={`tab-item ${view === 'chats' ? 'active' : ''}`} onClick={() => setView('chats')}><MessageCircle size={28} /><span>Чаты</span></button>
+                <button className={`tab-item ${view === 'calls' ? 'active' : ''}`} onClick={() => setView('calls')}><Phone size={28} /><span>Звонки</span></button>
                 <button className={`tab-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}><UserIcon size={28} /><span>Настройки</span></button>
               </div>
           )}
