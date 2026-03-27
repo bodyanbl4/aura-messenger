@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps } from 'firebase/app';
 import {
   getAuth,
   signInAnonymously,
@@ -16,25 +16,38 @@ import {
   addDoc
 } from 'firebase/firestore';
 import {
-  Search, MessageCircle, ChevronLeft, Send, Phone, User, Plus,
+  Search, MessageCircle, ChevronLeft, Send, Phone, Plus,
   AlertCircle, Lock, User as UserIcon, LogOut, Video,
   Smile, Mic, Moon, Sun, Camera, Save, Play, Square, X
 } from 'lucide-react';
 
-// --- КОНФИГУРАЦИЯ FIREBASE ---
-const getSafeConfig = (key, fallback) => {
+// --- БЕЗОПАСНАЯ ИНИЦИАЛИЗАЦИЯ FIREBASE ---
+// Функция для получения конфига без падения сборки
+const getFirebaseConfig = () => {
   try {
-    if (key === 'config') return JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-    if (key === 'appId') return typeof __app_id !== 'undefined' ? __app_id : fallback;
-    return fallback;
-  } catch (e) { return fallback; }
+    if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+      return JSON.parse(__firebase_config);
+    }
+  } catch (e) {
+    console.warn("Firebase config parse error", e);
+  }
+  return null;
 };
 
-const firebaseConfig = getSafeConfig('config', {});
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = getSafeConfig('appId', 'aura-messenger-v1');
+const firebaseConfig = getFirebaseConfig();
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'aura-messenger-v1';
+
+// Инициализируем Firebase только если есть конфиг и приложение еще не создано
+let app, auth, db;
+if (firebaseConfig && firebaseConfig.apiKey) {
+  if (!getApps().length) {
+    app = initializeApp(firebaseConfig);
+  } else {
+    app = getApps()[0];
+  }
+  auth = getAuth(app);
+  db = getFirestore(app);
+}
 
 const auraStyles = (isDark) => `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
@@ -144,6 +157,7 @@ export default function App() {
 
   // --- AUTH FIREBASE ---
   useEffect(() => {
+    if (!auth) return;
     const initAuth = async () => {
       try {
         const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
@@ -160,30 +174,35 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setFirebaseUser(u);
       const saved = localStorage.getItem('aura_app_user');
-      if (saved) setAppUser(JSON.parse(saved));
+      if (saved) {
+        try {
+          setAppUser(JSON.parse(saved));
+        } catch (e) {
+          localStorage.removeItem('aura_app_user');
+        }
+      }
     });
     return () => unsubscribe();
   }, []);
 
   // --- SYNC DATA ---
   useEffect(() => {
-    if (!firebaseUser) return;
+    if (!firebaseUser || !db) return;
 
     const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
     const unsubUsers = onSnapshot(usersRef, (snapshot) => {
       setAllUsers(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-    }, (err) => console.error("Users error", err));
+    }, (err) => console.error("Users sync error", err));
 
     const msgsRef = collection(db, 'artifacts', appId, 'public', 'data', 'messages');
     const unsubMsgs = onSnapshot(msgsRef, (snapshot) => {
       const msgsData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
       setAllMessages(msgsData.sort((a, b) => a.timestamp - b.timestamp));
-    }, (err) => console.error("Msgs error", err));
+    }, (err) => console.error("Msgs sync error", err));
 
     return () => { unsubUsers(); unsubMsgs(); };
   }, [firebaseUser]);
 
-  // --- ЛОГИКА ПОИСКА ---
   const getVisibleChats = () => {
     if (!appUser) return [];
 
@@ -218,7 +237,6 @@ export default function App() {
 
   const chats = getVisibleChats();
 
-  // --- HANDLERS ---
   const toggleTheme = () => {
     const next = !isDarkMode;
     setIsDarkMode(next);
@@ -226,8 +244,8 @@ export default function App() {
   };
 
   const handleAuth = async () => {
-    if (!username || !password) return setError("Заполните поля");
-    if (!firebaseUser) return setError("Подключение к облаку...");
+    if (!username || !password) return setError("Заполните все поля");
+    if (!db) return setError("Сервис временно недоступен");
     setError("");
 
     const userDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', username);
@@ -254,7 +272,7 @@ export default function App() {
   };
 
   const handleSendMessage = async (text, type = 'text') => {
-    if (!activeChatId || !appUser || (!text && type !== 'voice')) return;
+    if (!activeChatId || !appUser || !db || (!text && type !== 'voice')) return;
     const msgsRef = collection(db, 'artifacts', appId, 'public', 'data', 'messages');
     try {
       await addDoc(msgsRef, {
@@ -284,14 +302,18 @@ export default function App() {
       recorder.start();
       setMediaRecorder(recorder);
       setIsRecording(true);
-    } catch (err) { setError("Нет микрофона"); }
+    } catch (err) { setError("Нет доступа к микрофону"); }
   };
 
   const stopRecording = () => {
     if (mediaRecorder) { mediaRecorder.stop(); setIsRecording(false); }
   };
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [allMessages, activeChatId]);
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [allMessages, activeChatId]);
 
   if (!appUser) {
     return (
