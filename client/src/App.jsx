@@ -1,15 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
-import {
-  getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken
-} from 'firebase/auth';
-import {
-  getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc, query, where
-} from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
 import {
   Search, MessageCircle, ChevronLeft, Send, User as UserIcon, LogOut, Moon,
   Camera, ChevronRight, Globe, Edit3, Mic, Check, CheckCheck, Paperclip,
-  Trash, Trash2, Pin, Smile, Forward, Phone, Video, X, PhoneMissed, PhoneIncoming
+  Trash, Trash2, Pin, Smile, Forward, Phone, Video, X, PhoneMissed, PhoneIncoming,
+  RefreshCw, Lock // Добавлены иконки для переворота камеры и замка
 } from 'lucide-react';
 
 // --- 🔑 КОНФИГУРАЦИЯ FIREBASE ---
@@ -91,7 +88,6 @@ const auraStyles = (isDark) => `
   .bubble-other { background: var(--card-bg); color: var(--text-main); align-self: flex-start; border-bottom-left-radius: 4px; }
   
   .system-bubble { align-self: center; background: rgba(0,0,0,0.3); color: white; padding: 6px 14px; border-radius: 16px; font-size: 13px; font-weight: 500; backdrop-filter: blur(10px); margin: 10px 0; text-align: center; max-width: 90%; }
-
   .circle-video-wrap { width: 220px; height: 220px; border-radius: 50%; overflow: hidden; border: 3px solid ${isDark ? '#31A24C' : '#E1FFC7'}; background: #000; position: relative; cursor: pointer; flex-shrink: 0; }
   .circle-video-wrap video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); pointer-events: none; }
   .unread-dot { position: absolute; bottom: 20px; right: 20px; width: 14px; height: 14px; background: white; border-radius: 50%; box-shadow: 0 0 10px rgba(0,0,0,0.5); border: 2px solid var(--ios-blue); }
@@ -105,7 +101,6 @@ const auraStyles = (isDark) => `
   }
   
   .attachment-img { max-width: 240px; max-height: 300px; border-radius: 12px; object-fit: cover; display: block; }
-
   .tab-bar { height: 85px; border-top: 0.5px solid var(--sep); display: flex; justify-content: space-around; padding-top: 10px; flex-shrink: 0; z-index: 100; }
   .tab-item { display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--text-sec); cursor: pointer; border: none; background: none; flex: 1; }
   .tab-item.active { color: var(--ios-blue); }
@@ -115,20 +110,15 @@ const auraStyles = (isDark) => `
   
   .error-toast { position: absolute; top: 100px; left: 20px; right: 20px; background: rgba(255, 59, 48, 0.9); backdrop-filter: blur(10px); color: white; padding: 12px; border-radius: 12px; text-align: center; z-index: 3000; animation: slideInUp 0.3s ease; font-weight: bold; }
   @keyframes slideInUp { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-
   .blur-overlay { position: fixed; inset: 0; background: ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.2)'}; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); z-index: 2000; animation: fadeIn 0.2s ease; cursor: pointer; }
   @keyframes fadeIn { from { opacity: 0; backdrop-filter: blur(0px); } to { opacity: 1; backdrop-filter: blur(12px); } }
-
   .context-menu-popup { position: absolute; background: var(--card-bg); border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); width: 220px; z-index: 2005; overflow: hidden; border: 1px solid var(--sep); }
   .context-menu-btn { width: 100%; padding: 14px 16px; background: none; border: none; border-bottom: 0.5px solid var(--sep); color: var(--text-main); font-size: 16px; text-align: left; display: flex; align-items: center; gap: 12px; cursor: pointer; }
   .context-menu-btn:active { background: ${isDark ? '#2C2C2E' : '#F2F2F7'}; }
   .context-menu-btn.danger { color: #FF3B30; }
-
   .akashi-logo { width: 90px; height: 90px; background: #0a0a0a; border-radius: 24px; margin: 0 auto 25px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; box-shadow: 0 0 30px rgba(220,38,38,0.4); border: 1px solid rgba(239,68,68,0.2); }
   .akashi-glow { position: absolute; inset: 0; background: rgba(220,38,38,0.25); filter: blur(15px); border-radius: 50%; }
-
   .call-ring { position: absolute; inset: 0; border-radius: 50%; background: var(--ios-blue); z-index: 0; animation: callPulse 2s infinite ease-out; }
-
   .local-video-pip { position: absolute; bottom: 120px; right: 20px; width: 100px; height: 140px; border-radius: 16px; overflow: hidden; box-shadow: 0 5px 20px rgba(0,0,0,0.4); border: 2px solid rgba(255,255,255,0.2); z-index: 10000; background: #000; animation: popIn 0.5s ease; }
   .local-video-pip video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
 `;
@@ -149,9 +139,13 @@ export default function App() {
   const [authStep, setAuthStep] = useState('login');
   const [globalError, setGlobalError] = useState(null);
 
+  // Состояния для записи кружков и голосовых
   const [mode, setMode] = useState('voice');
   const [isRecording, setIsRecording] = useState(null);
   const [recTime, setRecTime] = useState(0);
+  const [cameraFacing, setCameraFacing] = useState('user'); // Новое состояние для камеры
+  const [isLocked, setIsLocked] = useState(false); // Замок для записи
+
   const [contextMenu, setContextMenu] = useState(null);
   const [showStickers, setShowStickers] = useState(false);
   const [forwardMsg, setForwardMsg] = useState(null);
@@ -167,7 +161,6 @@ export default function App() {
   const mediaRecorder = useRef(null);
   const videoPreviewRef = useRef(null);
   const audioChunks = useRef([]);
-
   const activeStream = useRef(null); // Стрим для кружков и локальной камеры звонка
   const remoteStream = useRef(null); // Стрим собеседника
   const peerConnection = useRef(null); // WebRTC RTCPeerConnection
@@ -175,9 +168,11 @@ export default function App() {
   const localVideoRef = useRef(null); // PIP видео (свое)
   const remoteAudioRef = useRef(null); // Аудио собеседника
 
+  // Рефы для обработки касаний и удержания кнопки записи
   const pressTimer = useRef(null);
   const callTimer = useRef(null);
   const isHolding = useRef(false);
+  const startY = useRef(0);
   const lastTapRef = useRef(0);
 
   useEffect(() => {
@@ -268,7 +263,6 @@ export default function App() {
           };
           await setDoc(userRef, newUser);
           setUser(newUser); localStorage.setItem('aura_user', JSON.stringify(newUser));
-
           await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
             text: `${name || username} перешел в Aura! 🎉`, uid: 'system', to: 'global', ts: Date.now(),
             name: 'Aura System', type: 'system', hiddenFor: [], isPinned: false, read: true, watched: true, reactions: {}
@@ -346,6 +340,7 @@ export default function App() {
     const rect = e.currentTarget.getBoundingClientRect();
     setContextMenu({ item, type, rect });
   };
+
   const closeContextMenu = () => setContextMenu(null);
 
   const deleteMessage = async (deleteType) => {
@@ -368,7 +363,6 @@ export default function App() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: type === 'video' ? { facingMode: 'user' } : false });
       activeStream.current = stream;
-
       const pc = new RTCPeerConnection(rtcServers);
       peerConnection.current = pc;
 
@@ -418,7 +412,6 @@ export default function App() {
           if (change.type === 'added') pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
         });
       });
-
     } catch (e) { showError("Нет доступа к камере/микрофону для звонка"); }
   };
 
@@ -426,11 +419,9 @@ export default function App() {
     if (!incomingCall) return;
     const { id: callId, type, offer, peer } = incomingCall;
     setIncomingCall(null);
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: type === 'video' ? { facingMode: 'user' } : false });
       activeStream.current = stream;
-
       const pc = new RTCPeerConnection(rtcServers);
       peerConnection.current = pc;
 
@@ -499,6 +490,7 @@ export default function App() {
 
   // --- ХЕЛПЕРЫ ---
   const formatTime = (seconds) => { const m = Math.floor(seconds / 60); const s = seconds % 60; return `${m}:${s < 10 ? '0' : ''}${s}`; };
+
   const formatTimeOnly = (ts) => {
     if (!ts) return '';
     try { return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch(e) { return ''; }
@@ -526,14 +518,15 @@ export default function App() {
     return 'Вложение';
   };
 
-  // БЕЗОПАСНАЯ ФИЛЬТРАЦИЯ ПОЛЬЗОВАТЕЛЕЙ (Устраняет сбой, если u.name undefined)
+  // ИСПРАВЛЕНИЕ: Безопасная фильтрация и предотвращение мутации массива
   const filteredUsers = allUsers.filter(u => u.username !== user?.username).filter(u => {
     if (!searchQuery) return true;
     const lowerQ = searchQuery.toLowerCase().replace('@', '');
     return (u.name || '').toLowerCase().includes(lowerQ) || (u.username || '').toLowerCase().includes(lowerQ);
   });
 
-  const sortedUsers = filteredUsers.sort((a, b) => {
+  // Добавлен Spread operator [...filteredUsers], чтобы избежать поломки поиска из-за мутации
+  const sortedUsers = [...filteredUsers].sort((a, b) => {
     const aPin = user.pinnedChats?.includes(a.username); const bPin = user.pinnedChats?.includes(b.username);
     if (aPin && !bPin) return -1; if (!aPin && bPin) return 1;
     const timeA = getLastMessage(a.username)?.ts || 0; const timeB = getLastMessage(b.username)?.ts || 0;
@@ -564,15 +557,18 @@ export default function App() {
     closeContextMenu();
   };
 
+  // --- ЛОГИКА ЗАПИСИ (Исправлено) ---
   const startMediaRecording = async (type) => {
     try {
-      const constraints = { audio: true, video: type === 'video' ? { facingMode: 'user', width: 400, height: 400 } : false };
+      const constraints = { audio: true, video: type === 'video' ? { facingMode: cameraFacing, width: 400, height: 400 } : false };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       activeStream.current = stream;
       const options = { mimeType: type === 'video' ? 'video/webm;codecs=vp8' : 'audio/webm' };
       mediaRecorder.current = new MediaRecorder(stream, options);
       audioChunks.current = [];
+
       mediaRecorder.current.ondataavailable = e => { if (e.data.size > 0) audioChunks.current.push(e.data); };
+
       mediaRecorder.current.onstop = () => {
         if (mediaRecorder.current.cancelRecord) { stream.getTracks().forEach(t => t.stop()); activeStream.current = null; return; }
         const blob = new Blob(audioChunks.current, { type: type === 'video' ? 'video/webm' : 'audio/webm' });
@@ -583,6 +579,7 @@ export default function App() {
         };
         reader.readAsDataURL(blob);
       };
+
       mediaRecorder.current.start();
       setIsRecording(type); setRecTime(0);
       mediaRecorder.current.timer = setInterval(() => setRecTime(p => p + 1), 1000);
@@ -591,23 +588,79 @@ export default function App() {
 
   const stopMediaRecording = () => {
     if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
-      mediaRecorder.current.stop(); clearInterval(mediaRecorder.current.timer); setIsRecording(null);
+      mediaRecorder.current.stop();
+      clearInterval(mediaRecorder.current.timer);
     }
+    setIsRecording(null);
+    setIsLocked(false);
   };
 
   const cancelMediaRecording = () => {
     if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
-      mediaRecorder.current.cancelRecord = true; mediaRecorder.current.stop(); clearInterval(mediaRecorder.current.timer); setIsRecording(null);
+      mediaRecorder.current.cancelRecord = true;
+      mediaRecorder.current.stop();
+      clearInterval(mediaRecorder.current.timer);
+    }
+    setIsRecording(null);
+    setIsLocked(false);
+    isHolding.current = false;
+  };
+
+  // Переворот камеры "на лету" без остановки записи
+  const flipCamera = async (e) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    const nextFacing = cameraFacing === 'user' ? 'environment' : 'user';
+    setCameraFacing(nextFacing);
+
+    if (isRecording === 'video' && activeStream.current) {
+      try {
+        const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: nextFacing, width: 400, height: 400 } });
+        const newVideoTrack = newStream.getVideoTracks()[0];
+        const oldVideoTrack = activeStream.current.getVideoTracks()[0];
+
+        if (oldVideoTrack) {
+          activeStream.current.removeTrack(oldVideoTrack);
+          oldVideoTrack.stop();
+        }
+        activeStream.current.addTrack(newVideoTrack);
+
+        if (videoPreviewRef.current) {
+          videoPreviewRef.current.srcObject = activeStream.current;
+        }
+      } catch (err) {
+        console.error("Ошибка переворота камеры", err);
+      }
     }
   };
 
+  // Улучшенные обработчики Pointer для предотвращения багов с "кирпичностью" и удержанием
   const handlePointerDown = (e) => {
-    e.preventDefault(); isHolding.current = false;
-    pressTimer.current = setTimeout(() => { isHolding.current = true; startMediaRecording(mode); }, 300);
+    isHolding.current = false;
+    setIsLocked(false);
+    startY.current = e.clientY;
+    pressTimer.current = setTimeout(() => {
+      isHolding.current = true;
+      startMediaRecording(mode);
+    }, 300);
   };
+
+  const handlePointerMove = (e) => {
+    if (isHolding.current && !isLocked) {
+      if (startY.current - e.clientY > 40) { // Свайп вверх на 40px фиксирует запись
+        setIsLocked(true);
+      }
+    }
+  };
+
   const handlePointerUp = (e) => {
-    e.preventDefault(); clearTimeout(pressTimer.current);
-    if (isHolding.current) { stopMediaRecording(); } else { setMode(prev => prev === 'voice' ? 'video' : 'voice'); }
+    clearTimeout(pressTimer.current);
+    if (isLocked && isRecording) return; // Если запись заблокирована свайпом, не останавливаем
+
+    if (isHolding.current) {
+      stopMediaRecording();
+    } else {
+      if (!isRecording) setMode(prev => prev === 'voice' ? 'video' : 'voice');
+    }
     isHolding.current = false;
   };
 
@@ -621,11 +674,11 @@ export default function App() {
   // --- КОМПОНЕНТЫ СООБЩЕНИЙ ---
   const renderMessageContent = (m, isClone = false) => {
     if (m.type === 'system') return <div key={m.id} className="system-bubble" style={{ margin: isClone ? 0 : '10px 0' }}>{m.text}</div>;
-
     const isMine = m.uid === user?.username;
     const isSticker = m.type === 'sticker';
     const isImage = m.type === 'image';
     const isCircle = m.type === 'video_circle';
+
     let contentStyle = { padding: isImage || isSticker || isCircle ? 0 : '8px 12px', background: isImage || isSticker || isCircle ? 'transparent' : '', boxShadow: isImage || isSticker || isCircle ? 'none' : '' };
     if (isClone) contentStyle.margin = 0;
 
@@ -709,7 +762,6 @@ export default function App() {
       <div className="app-container">
         <style>{auraStyles(isDark)}</style>
         <div className="phone-screen">
-
           {/* ПЕРЕСЫЛКА УВЕДОМЛЕНИЕ */}
           {forwardMsg && (
               <div style={{position: 'absolute', top: 0, left: 0, right: 0, background: 'var(--ios-blue)', color: 'white', padding: 10, textAlign: 'center', zIndex: 1000, fontWeight: 'bold', animation: 'slideIn 0.3s ease'}}>
@@ -723,14 +775,12 @@ export default function App() {
               <div style={{position: 'absolute', inset: 0, zIndex: 10000, background: isDark ? 'rgba(28,28,30,0.95)' : 'rgba(255,255,255,0.95)', backdropFilter: 'blur(40px)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 80, paddingBottom: 60, animation: 'fadeIn 0.3s ease'}}>
                 <div style={{color: 'var(--text-main)', fontSize: 32, fontWeight: 'bold'}}>{incomingCall.peer?.name || incomingCall.caller}</div>
                 <div style={{color: 'var(--text-sec)', fontSize: 18, marginTop: 8}}>{incomingCall.type === 'video' ? 'Входящий видеозвонок...' : 'Входящий аудиозвонок...'}</div>
-
                 <div style={{flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
                   <div style={{position: 'relative', width: 160, height: 160}}>
                     <div className="call-ring"></div>
                     <img src={incomingCall.peer?.avatar || ''} style={{width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', position: 'relative', zIndex: 10, border: '4px solid var(--ios-blue)'}} alt="caller" />
                   </div>
                 </div>
-
                 <div style={{display: 'flex', gap: 60, marginBottom: 20}}>
                   <button onClick={declineCall} style={{background: '#FF3B30', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(255,59,48,0.4)', transition: 'transform 0.1s'}} onMouseDown={e => e.currentTarget.style.transform='scale(0.9)'} onMouseUp={e => e.currentTarget.style.transform='scale(1)'}>
                     <Phone size={36} color="white" style={{transform: 'rotate(135deg)'}} />
@@ -746,18 +796,15 @@ export default function App() {
           {activeCall && (
               <div style={{position: 'absolute', inset: 0, zIndex: 9999, background: isDark ? 'rgba(28,28,30,0.85)' : 'rgba(255,255,255,0.85)', backdropFilter: 'blur(40px)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 60, paddingBottom: 40, animation: 'fadeIn 0.3s ease'}}>
                 <audio ref={remoteAudioRef} autoPlay />
-
                 {activeCall.type === 'video' && activeCall.status === 'connected' && (
                     <div className="local-video-pip">
                       <video ref={localVideoRef} autoPlay muted playsInline />
                     </div>
                 )}
-
                 <div style={{color: 'var(--text-main)', fontSize: 32, fontWeight: 'bold', textShadow: '0 2px 10px rgba(0,0,0,0.2)'}}>{activeCall.peer?.name}</div>
                 <div style={{color: 'var(--text-main)', fontSize: 18, marginTop: 8, opacity: 0.8}}>
                   {activeCall.status === 'calling' ? 'Звонок...' : `На связи ${formatTime(callDuration)}`}
                 </div>
-
                 <div style={{flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', padding: 20}}>
                   {activeCall.type === 'video' && activeCall.status === 'connected' ? (
                       <video ref={callVideoRef} autoPlay playsInline style={{width: '100%', height: '100%', objectFit: 'cover', borderRadius: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.3)', transform: 'scaleX(-1)'}} />
@@ -841,7 +888,6 @@ export default function App() {
                     const peer = allUsers.find(u => u.username === peerUsername) || { name: peerUsername, avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${peerUsername}` };
                     const Icon = log.status === 'missed' ? PhoneMissed : (isIncoming ? PhoneIncoming : Phone);
                     const color = log.status === 'missed' ? '#FF3B30' : (isIncoming ? 'var(--ios-blue)' : '#34C759');
-
                     return (
                         <div key={log.id} className="ios-item" style={{cursor: 'default'}}>
                           <img src={peer.avatar} className="avatar" style={{marginRight: 14}} alt="avatar" />
@@ -922,20 +968,43 @@ export default function App() {
                   {currentMessages.map((m) => <React.Fragment key={m.id}>{renderMessageContent(m)}</React.Fragment>)}
                 </div>
 
+                {/* Оверлей записи (с замком и переворотом камеры) */}
                 {isRecording && (
                     <div style={{position: 'absolute', bottom: 85, left: 0, right: 0, display: 'flex', justifyContent: 'center', zIndex: 150}}>
                       <div className="glass-panel" style={{borderRadius: 40, padding: '8px 20px 8px 8px', display: 'flex', alignItems: 'center', gap: 15, boxShadow: '0 10px 25px rgba(0,0,0,0.2)', border: '1px solid var(--sep)'}}>
+
                         {isRecording === 'video' ? (
-                            <div style={{width: 80, height: 80, borderRadius: '50%', overflow: 'hidden', border: '3px solid var(--ios-blue)'}}>
-                              <video ref={videoPreviewRef} autoPlay muted playsInline style={{width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)'}} />
+                            <div style={{position: 'relative'}}>
+                              <div style={{width: 80, height: 80, borderRadius: '50%', overflow: 'hidden', border: '3px solid var(--ios-blue)'}}>
+                                <video ref={videoPreviewRef} autoPlay muted playsInline style={{width: '100%', height: '100%', objectFit: 'cover', transform: cameraFacing === 'user' ? 'scaleX(-1)' : 'scaleX(1)'}} />
+                              </div>
+                              <button onPointerDown={flipCamera} style={{position: 'absolute', top: -5, right: -5, background: 'var(--card-bg)', border: '1px solid var(--sep)', borderRadius: '50%', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 10, boxShadow: '0 2px 5px rgba(0,0,0,0.2)'}}>
+                                <RefreshCw size={16} color="var(--text-main)" />
+                              </button>
                             </div>
-                        ) : <div style={{width: 50, height: 50, borderRadius: '50%', background: 'var(--ios-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center'}}><Mic size={24} color="white" /></div>}
-                        <div style={{display: 'flex', flexDirection: 'column'}}>
+                        ) : (
+                            <div style={{width: 50, height: 50, borderRadius: '50%', background: 'var(--ios-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center'}}><Mic size={24} color="white" /></div>
+                        )}
+
+                        <div style={{display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 100}}>
                           <div style={{display: 'flex', alignItems: 'center', gap: 8, color: '#FF3B30', fontWeight: 'bold', fontSize: 18}}>
                             <div style={{width: 10, height: 10, borderRadius: '50%', background: '#FF3B30', animation: 'pulseGlow 1s infinite'}} />{formatTime(recTime)}
                           </div>
-                          <button onClick={cancelMediaRecording} style={{background: 'none', border: 'none', color: 'var(--text-sec)', fontSize: 14, marginTop: 4, cursor: 'pointer', textAlign: 'left', outline: 'none'}}>Отменить</button>
+                          {!isLocked ? (
+                              <div style={{fontSize: 11, color: 'var(--text-sec)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 3}}>
+                                <Lock size={10} /> Свайп вверх
+                              </div>
+                          ) : (
+                              <button onClick={cancelMediaRecording} style={{background: 'none', border: 'none', color: 'var(--text-sec)', fontSize: 14, marginTop: 4, cursor: 'pointer', textAlign: 'left', outline: 'none'}}>Отменить</button>
+                          )}
                         </div>
+
+                        {isLocked && (
+                            <button onClick={() => { stopMediaRecording(); setIsLocked(false); }} style={{background: 'var(--ios-blue)', color: 'white', borderRadius: '50%', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', marginLeft: 5}}>
+                              <Send size={20} />
+                            </button>
+                        )}
+
                       </div>
                     </div>
                 )}
@@ -950,15 +1019,33 @@ export default function App() {
                   <button style={{background: 'none', border: 'none', color: 'var(--text-sec)', cursor: 'pointer', paddingBottom: 6}} onClick={() => fileInputRef.current?.click()}>
                     <Paperclip size={26} /><input type="file" hidden ref={fileInputRef} accept="image/*" onChange={e => { const f = e.target.files[0]; if(f){ const r = new FileReader(); r.onload=()=>sendMessage(r.result,'image'); r.readAsDataURL(f); } }} />
                   </button>
+
                   <div style={{flex: 1, position: 'relative', display: 'flex', alignItems: 'center'}}>
                     <textarea style={{width: '100%', padding: '9px 40px 9px 16px', borderRadius: 20, border: `1px solid var(--sep)`, background: isDark ? '#2C2C2E' : '#FFFFFF', color: 'var(--text-main)', fontSize: 16, outline: 'none', resize: 'none', maxHeight: 100}} rows={1} value={input} onChange={e => setInput(e.target.value)} placeholder="Сообщение" onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }} />
                     <button style={{position: 'absolute', right: 10, background: 'none', border: 'none', color: showStickers ? 'var(--ios-blue)' : 'var(--text-sec)', cursor: 'pointer', bottom: 6}} onClick={() => setShowStickers(!showStickers)}><Smile size={24} /></button>
                   </div>
+
                   {input.trim() ? (
                       <button onClick={() => sendMessage(input)} style={{background: 'var(--ios-blue)', borderRadius: '50%', width: 36, height: 36, border: 'none', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', marginBottom: 2}}><Send size={18}/></button>
                   ) : (
-                      <button onPointerDown={handlePointerDown} onTouchStart={handlePointerDown} onPointerUp={handlePointerUp} onTouchEnd={handlePointerUp} onPointerLeave={handlePointerUp} style={{background: 'none', border: 'none', color: isRecording ? '#FF3B30' : 'var(--text-sec)', cursor: 'pointer', paddingBottom: 6, transform: isRecording ? 'scale(1.2)' : 'scale(1)', transition: '0.2s'}}>
-                        {mode === 'voice' ? <Mic size={26}/> : <Camera size={26}/>}
+                      <button
+                          onPointerDown={handlePointerDown}
+                          onPointerMove={handlePointerMove}
+                          onPointerUp={handlePointerUp}
+                          onPointerLeave={handlePointerUp}
+                          onPointerCancel={handlePointerUp}
+                          style={{
+                            touchAction: 'none', // Запрещает скролл при касании, убирая дерганные срабатывания (баг с кирпичностью)
+                            background: 'none', border: 'none',
+                            color: isRecording ? '#FF3B30' : 'var(--text-sec)',
+                            cursor: 'pointer', paddingBottom: 6,
+                            transform: isRecording && !isLocked ? 'scale(1.2)' : 'scale(1)',
+                            transition: 'transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
+                          }}
+                      >
+                        <div style={{ transition: 'transform 0.3s ease', transform: `rotate(${mode === 'video' ? '360deg' : '0deg'})` }}>
+                          {mode === 'voice' ? <Mic size={26}/> : <Camera size={26}/>}
+                        </div>
                       </button>
                   )}
                 </div>
