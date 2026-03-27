@@ -15,107 +15,96 @@ const auraStyles = `
   :root { 
     --ios-blue: #007AFF; 
     --ios-bg: #F2F2F7;
-    --glass-bg: rgba(255, 255, 255, 0.7);
-    --glass-border: rgba(255, 255, 255, 0.3);
+    --glass-bg: rgba(255, 255, 255, 0.8);
+    --glass-border: rgba(255, 255, 255, 0.2);
   }
   
+  * { box-sizing: border-box; }
+
   body { 
     font-family: 'Inter', -apple-system, sans-serif; 
     margin: 0; padding: 0; overflow: hidden; 
-    background: linear-gradient(135deg, #E2E2E2 0%, #FFFFFF 100%);
+    background: #FFFFFF;
     color: black;
     user-select: none; 
-    -webkit-tap-highlight-color: transparent;
   }
 
-  .glass {
+  /* Основные контейнеры без Tailwind */
+  .screen { height: 100vh; width: 100%; display: flex; flex-direction: column; background: var(--ios-bg); position: relative; }
+  .flex-center { display: flex; align-items: center; justify-content: center; }
+  .flex-col { display: flex; flex-direction: column; }
+  .flex-row { display: flex; flex-direction: row; align-items: center; }
+  .hidden { display: none !important; }
+
+  /* Эффект iOS 26 Glass */
+  .glass-nav {
     background: var(--glass-bg);
-    backdrop-filter: blur(25px) saturate(180%);
-    -webkit-backdrop-filter: blur(25px) saturate(180%);
-    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(30px) saturate(200%);
+    -webkit-backdrop-filter: blur(30px) saturate(200%);
+    border-bottom: 0.5px solid rgba(0,0,0,0.1);
+    padding: 50px 20px 15px;
+    z-index: 100;
   }
 
-  .ios-card {
+  .glass-card {
     background: white;
-    border-radius: 28px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+    border-radius: 35px;
+    padding: 30px;
+    box-shadow: 0 15px 40px rgba(0,0,0,0.08);
+    width: 100%;
+    max-width: 380px;
+    text-align: center;
   }
 
   /* Анимации */
-  @keyframes spring-in {
-    0% { transform: scale(0.9) translateY(30px); opacity: 0; }
-    60% { transform: scale(1.02) translateY(-5px); opacity: 1; }
-    100% { transform: scale(1) translateY(0); opacity: 1; }
+  @keyframes ios-pop {
+    0% { transform: scale(0.9); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
   }
+  .animate-pop { animation: ios-pop 0.4s cubic-bezier(0.15, 0.9, 0.3, 1.1) forwards; }
 
-  @keyframes slide-right {
-    from { transform: translateX(100%); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
+  /* Фикс Аватаров */
+  .avatar-main { width: 90px; height: 90px; border-radius: 28px; margin-bottom: 20px; box-shadow: 0 8px 20px rgba(0,122,255,0.2); }
+  .avatar-list { width: 56px !important; height: 56px !important; border-radius: 50%; object-fit: cover; margin-right: 15px; border: 2px solid white; }
+  .avatar-small { width: 38px !important; height: 38px !important; border-radius: 50%; border: 1.5px solid white; }
+
+  /* Чат и сообщения */
+  .chat-list { flex: 1; overflow-y: auto; padding: 10px 0; }
+  .chat-item { 
+    display: flex; align-items: center; padding: 15px 20px; margin: 5px 15px; 
+    background: white; border-radius: 24px; cursor: pointer; transition: 0.2s;
   }
+  .chat-item:active { transform: scale(0.97); background: #f9f9f9; }
 
-  @keyframes pulse-glow {
-    0% { box-shadow: 0 0 0 0 rgba(0, 122, 255, 0.4); }
-    70% { box-shadow: 0 0 0 15px rgba(0, 122, 255, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(0, 122, 255, 0); }
+  .msg-container { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; background: #fff; }
+  .bubble { 
+    max-width: 75%; padding: 12px 18px; border-radius: 22px; font-size: 16px; 
+    position: relative; line-height: 1.4; 
   }
+  .bubble-me { background: var(--ios-blue); color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
+  .bubble-other { background: #E9E9EB; color: black; align-self: flex-start; border-bottom-left-radius: 4px; }
+  .sticker { font-size: 60px; background: none !important; padding: 0 !important; }
 
-  .animate-spring { animation: spring-in 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
-  .animate-slide { animation: slide-right 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
-  
-  .message-bubble {
-    position: relative;
-    max-width: 75%;
-    padding: 12px 16px;
-    border-radius: 20px;
-    font-size: 15px;
-    line-height: 1.4;
-    transition: transform 0.2s ease;
+  /* Поля ввода */
+  .ios-input-group { background: #F2F2F7; border-radius: 18px; display: flex; align-items: center; padding: 12px 15px; margin-bottom: 12px; }
+  .ios-input-group input { background: transparent; border: none; outline: none; width: 100%; font-size: 16px; margin-left: 10px; font-weight: 500; }
+
+  .btn-primary { 
+    background: var(--ios-blue); color: white; border: none; width: 100%; 
+    height: 58px; border-radius: 20px; font-size: 18px; font-weight: 700; 
+    margin-top: 15px; cursor: pointer; transition: 0.3s;
   }
-  
-  .message-bubble:active { transform: scale(0.98); }
+  .btn-primary:active { transform: scale(0.96); opacity: 0.9; }
 
-  .my-message {
-    background: linear-gradient(145deg, #007AFF, #0051FF);
-    color: white;
-    border-bottom-right-radius: 4px;
-    box-shadow: 0 4px 15px rgba(0, 122, 255, 0.3);
+  .bottom-bar { 
+    padding: 15px 20px 35px; background: var(--glass-bg); 
+    backdrop-filter: blur(20px); border-top: 0.5px solid rgba(0,0,0,0.05);
+    display: flex; align-items: center; gap: 12px;
   }
+  .msg-input { flex: 1; background: #f0f0f5; border: none; border-radius: 25px; padding: 12px 20px; outline: none; font-size: 16px; }
+  .send-btn { background: var(--ios-blue); border: none; color: white; width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
 
-  .other-message {
-    background: #E9E9EB;
-    color: black;
-    border-bottom-left-radius: 4px;
-  }
-
-  .no-scrollbar::-webkit-scrollbar { display: none; }
-  
-  .safe-area-top { padding-top: env(safe-area-inset-top, 44px); }
-  .safe-area-bottom { padding-bottom: env(safe-area-inset-bottom, 34px); }
-
-  .ios-input {
-    background: rgba(118, 118, 128, 0.12);
-    border-radius: 20px;
-    padding: 10px 16px;
-    transition: all 0.2s;
-  }
-  
-  .ios-input:focus {
-    background: rgba(118, 118, 128, 0.18);
-  }
-
-  .auth-btn {
-    background: linear-gradient(145deg, #007AFF, #0051FF);
-    box-shadow: 0 8px 25px rgba(0, 122, 255, 0.4);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .auth-btn:active { transform: scale(0.96); opacity: 0.9; }
-
-  .avatar-ring {
-    padding: 2px;
-    background: linear-gradient(45deg, #007AFF, #5856D6);
-    border-radius: 50%;
-  }
+  .status-dot { width: 12px; height: 12px; background: #34C759; border: 2px solid white; border-radius: 50%; position: absolute; bottom: 0; right: 15px; }
 `;
 
 export default function App() {
@@ -134,9 +123,8 @@ export default function App() {
 
   const messagesEndRef = useRef(null);
 
-  // --- АВТОРИЗАЦИЯ ---
   const handleAuth = async () => {
-    if (!username || !password) return setError("Заполните все поля");
+    if (!username || !password) return setError("Заполните поля");
     setIsLoading(true); setError("");
     const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
     try {
@@ -147,29 +135,21 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success) {
-        initSession(data.user);
+        setUser(data.user);
+        const s = io(SERVER_URL);
+        setSocket(s);
+        s.emit('user_online', data.user.id);
+        fetch(`${SERVER_URL}/api/sync?userId=${data.user.id}`)
+            .then(r => r.json()).then(d => d.success && setChats(d.chats));
       } else { setError(data.error || "Доступ запрещен"); }
     } catch (e) { setError("Сервер просыпается... Подождите минуту."); }
     finally { setIsLoading(false); }
   };
 
-  const initSession = (userData) => {
-    setUser(userData);
-    const s = io(SERVER_URL);
-    setSocket(s);
-    s.emit('user_online', userData.id);
-    fetch(`${SERVER_URL}/api/sync?userId=${userData.id}`)
-        .then(res => res.json())
-        .then(data => { if (data.success) setChats(data.chats); });
-  };
-
   useEffect(() => {
     if (!socket) return;
     socket.on('new_msg', (msg) => {
-      setChats(prev => prev.map(c =>
-          (c.id === msg.senderId || c.id === msg.receiverId)
-              ? { ...c, messages: [...c.messages, msg] } : c
-      ));
+      setChats(prev => prev.map(c => (c.id === msg.senderId || c.id === msg.receiverId) ? { ...c, messages: [...c.messages, msg] } : c));
     });
     return () => socket.off('new_msg');
   }, [socket]);
@@ -180,244 +160,133 @@ export default function App() {
     setInputText(''); setShowStickers(false);
   };
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chats, activeChatId]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chats, activeChatId]);
 
-  // --- ЭКРАН ВХОДА ---
+  // ЭКРАН ВХОДА
   if (!user) {
     return (
-        <div className="h-screen w-full flex items-center justify-center p-6 overflow-hidden">
+        <div className="screen flex-center" style={{padding: '20px'}}>
           <style>{auraStyles}</style>
-          <div className="w-full max-w-[380px] animate-spring">
-            <div className="glass rounded-[45px] p-10 flex flex-col items-center shadow-2xl relative overflow-hidden">
-              {/* Декоративный фон */}
-              <div className="absolute -top-20 -right-20 w-40 h-40 bg-blue-400/20 rounded-full blur-3xl"></div>
+          <div className="glass-card animate-pop">
+            <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=Aura&backgroundColor=007AFF`} className="avatar-main" />
+            <h1 style={{margin: '0 0 5px', fontSize: '32px', fontWeight: '800'}}>Aura</h1>
+            <p style={{color: '#8E8E93', margin: '0 0 30px', fontWeight: '500'}}>{isRegister ? 'Регистрация iOS 26' : 'Вход в мессенджер'}</p>
 
-              <div className="w-24 h-24 bg-white rounded-[32px] flex items-center justify-center shadow-2xl mb-8 border border-white/50">
-                <MessageCircle size={56} className="text-[#007AFF]" strokeWidth={2.5} />
-              </div>
+            {error && <div style={{color: '#FF3B30', background: '#FFF2F2', padding: '12px', borderRadius: '15px', marginBottom: '15px', fontSize: '14px', fontWeight: '600'}}>{error}</div>}
 
-              <h1 className="text-5xl font-extrabold tracking-tighter italic mb-2">Aura</h1>
-              <p className="text-gray-500 font-medium mb-10 text-center">Next-Gen Messaging</p>
-
-              <div className="w-full space-y-4">
-                {error && (
-                    <div className="bg-red-50 text-red-500 p-4 rounded-2xl text-sm font-semibold flex items-center gap-2 border border-red-100 animate-spring">
-                      <AlertCircle size={18}/> {error}
-                    </div>
-                )}
-
-                <div className="ios-input flex items-center gap-3">
-                  <UserIcon size={20} className="text-gray-400" />
-                  <input
-                      type="text" placeholder="Логин"
-                      className="bg-transparent w-full outline-none font-semibold text-black"
-                      value={username} onChange={e => setUsername(e.target.value.toLowerCase().trim())}
-                  />
-                </div>
-
-                <div className="ios-input flex items-center gap-3">
-                  <Lock size={20} className="text-gray-400" />
-                  <input
-                      type="password" placeholder="Пароль"
-                      className="bg-transparent w-full outline-none font-semibold text-black"
-                      value={password} onChange={e => setPassword(e.target.value)}
-                  />
-                </div>
-
-                {isRegister && (
-                    <div className="ios-input flex items-center gap-3 animate-slide">
-                      <Plus size={20} className="text-gray-400" />
-                      <input
-                          type="text" placeholder="Ваше имя"
-                          className="bg-transparent w-full outline-none font-semibold text-black"
-                          value={displayName} onChange={e => setDisplayName(e.target.value)}
-                      />
-                    </div>
-                )}
-
-                <button
-                    onClick={handleAuth} disabled={isLoading}
-                    className="auth-btn w-full text-white h-16 rounded-[24px] font-bold text-lg mt-4 disabled:opacity-50"
-                >
-                  {isLoading ? 'Загрузка...' : (isRegister ? 'Создать аккаунт' : 'Войти')}
-                </button>
-
-                <button
-                    onClick={() => { setIsRegister(!isRegister); setError(""); }}
-                    className="w-full text-center mt-6 text-gray-500 font-bold text-sm hover:text-blue-500 transition-colors"
-                >
-                  {isRegister ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Зарегистрироваться'}
-                </button>
-              </div>
+            <div className="ios-input-group">
+              <UserIcon size={20} color="#A0A0A5" />
+              <input placeholder="Логин" value={username} onChange={e => setUsername(e.target.value.toLowerCase().trim())} />
             </div>
+
+            <div className="ios-input-group">
+              <Lock size={20} color="#A0A0A5" />
+              <input type="password" placeholder="Пароль" value={password} onChange={e => setPassword(e.target.value)} />
+            </div>
+
+            {isRegister && (
+                <div className="ios-input-group animate-pop">
+                  <Plus size={20} color="#A0A0A5" />
+                  <input placeholder="Ваше имя" value={displayName} onChange={e => setDisplayName(e.target.value)} />
+                </div>
+            )}
+
+            <button className="btn-primary" onClick={handleAuth}>{isLoading ? 'Загрузка...' : (isRegister ? 'Создать' : 'Войти')}</button>
+
+            <p style={{marginTop: '20px', fontSize: '14px', color: '#8E8E93', fontWeight: '600'}}>
+              {isRegister ? 'Уже есть аккаунт?' : 'Впервые здесь?'}
+              <span onClick={() => setIsRegister(!isRegister)} style={{color: '#007AFF', marginLeft: '8px', cursor: 'pointer'}}>
+              {isRegister ? 'Войти' : 'Создать'}
+            </span>
+            </p>
           </div>
         </div>
     );
   }
 
-  // --- ГЛАВНЫЙ ЭКРАН ---
   const activeChat = chats.find(c => c.id === activeChatId);
 
   return (
-      <div className="h-screen w-full bg-[#F2F2F7] flex flex-col font-sans overflow-hidden text-black">
+      <div className="screen">
         <style>{auraStyles}</style>
 
-        {/* Список чатов */}
-        <div className={`flex-1 flex flex-col ${activeChatId ? 'hidden' : 'flex'}`}>
-          <div className="glass safe-area-top pt-12 pb-4 px-6 sticky top-0 z-20">
-            <div className="flex justify-between items-center mb-6">
-              <h1 className="text-4xl font-extrabold tracking-tight italic">Чаты</h1>
-              <div className="flex gap-4">
-                <div className="avatar-ring">
-                  <img src={user.avatar} className="w-10 h-10 rounded-full border-2 border-white shadow-sm" />
-                </div>
-              </div>
+        {/* СПИСОК ЧАТОВ */}
+        <div className={`flex-col h-full ${activeChatId ? 'hidden' : ''}`}>
+          <div className="glass-nav">
+            <div className="flex-row" style={{justifyContent: 'space-between', marginBottom: '20px'}}>
+              <h1 style={{margin: 0, fontSize: '34px', fontWeight: '800', letterSpacing: '-1px'}}>Чаты</h1>
+              <img src={user.avatar} className="avatar-small" alt="My avatar" />
             </div>
-            <div className="ios-input flex items-center p-3 text-gray-400">
-              <Search size={20} className="mr-3" />
-              <input type="text" placeholder="Поиск" className="bg-transparent w-full outline-none font-medium text-black" />
+            <div className="ios-input-group" style={{marginBottom: 0}}>
+              <Search size={20} color="#A0A0A5" />
+              <input placeholder="Поиск" />
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto no-scrollbar pt-2">
+          <div className="chat-list">
             {chats.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full opacity-30 px-10 text-center">
-                  <MessageCircle size={80} strokeWidth={1} />
-                  <p className="mt-4 font-bold text-xl">Здесь пока пусто</p>
+                <div style={{textAlign: 'center', marginTop: '100px', color: '#A0A0A5'}}>
+                  <MessageCircle size={60} style={{opacity: 0.2, marginBottom: '10px'}} />
+                  <p>Нет активных чатов</p>
                 </div>
             ) : (
                 chats.map(chat => (
-                    <div
-                        key={chat.id}
-                        onClick={() => setActiveChatId(chat.id)}
-                        className="flex items-center py-4 px-6 mx-4 my-1 rounded-3xl bg-white/50 active:scale-[0.97] active:bg-white/80 transition-all cursor-pointer"
-                    >
-                      <div className="relative">
-                        <img src={chat.avatar} className="w-16 h-16 rounded-full mr-4 border-2 border-white shadow-md" />
-                        <div className="absolute bottom-1 right-5 w-4 h-4 bg-green-500 border-2 border-white rounded-full"></div>
+                    <div key={chat.id} className="chat-item" onClick={() => setActiveChatId(chat.id)}>
+                      <div style={{position: 'relative'}}>
+                        <img src={chat.avatar} className="avatar-list" alt={`${chat.name}'s avatar`} />
+                        <div className="status-dot"></div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex justify-between items-center mb-1">
-                          <h3 className="font-bold text-[18px] truncate">{chat.name}</h3>
-                          <span className="text-gray-400 text-xs font-semibold">
-                      {(chat.messages[chat.messages.length-1])?.time || ''}
-                    </span>
+                      <div style={{flex: 1}}>
+                        <div className="flex-row" style={{justifyContent: 'space-between'}}>
+                          <b style={{fontSize: '17px'}}>{chat.name}</b>
+                          <span style={{fontSize: '12px', color: '#A0A0A5'}}>{chat.messages.slice(-1)[0]?.time || ''}</span>
                         </div>
-                        <p className="text-gray-500 text-[15px] truncate font-medium">
-                          {chat.messages[chat.messages.length-1]?.type === 'sticker'
-                              ? '🎨 Стикер'
-                              : chat.messages[chat.messages.length-1]?.text || 'Нажмите, чтобы начать чат'}
-                        </p>
+                        <div style={{color: '#8E8E93', fontSize: '15px', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '200px'}}>
+                          {chat.messages.slice(-1)[0]?.type === 'sticker' ? '🎨 Стикер' : chat.messages.slice(-1)[0]?.text || 'Начните общение...'}
+                        </div>
                       </div>
                     </div>
                 ))
             )}
           </div>
-
-          {/* Таб-бар */}
-          <div className="safe-area-bottom h-24 glass flex justify-around items-center px-10">
-            <div className="flex flex-col items-center text-[#007AFF] animate-spring">
-              <MessageCircle size={30} strokeWidth={2.5} />
-              <span className="text-[11px] font-bold mt-1">Чаты</span>
-            </div>
-            <div onClick={() => window.location.reload()} className="flex flex-col items-center text-gray-400 active:text-red-500 transition-colors cursor-pointer">
-              <LogOut size={30} strokeWidth={2} />
-              <span className="text-[11px] font-medium mt-1">Выход</span>
-            </div>
-          </div>
         </div>
 
-        {/* Окно чата */}
+        {/* ОКНО ЧАТА */}
         {activeChatId && activeChat && (
-            <div className="fixed inset-0 bg-white z-50 flex flex-col animate-slide">
-              <div className="glass safe-area-top flex items-center px-4 pt-10 pb-4 border-b border-gray-100">
-                <button
-                    onClick={() => setActiveChatId(null)}
-                    className="text-[#007AFF] flex items-center active:opacity-50 transition-opacity"
-                >
-                  <ChevronLeft size={34} className="-ml-2" />
-                  <span className="text-lg font-bold">Назад</span>
+            <div className="screen" style={{position: 'fixed', top: 0, left: 0, zIndex: 200}}>
+              <div className="glass-nav flex-row" style={{paddingTop: '50px'}}>
+                <button onClick={() => setActiveChatId(null)} style={{background: 'none', border: 'none', color: '#007AFF', display: 'flex', alignItems: 'center', fontSize: '18px', fontWeight: '600', cursor: 'pointer'}}>
+                  <ChevronLeft size={30} style={{marginLeft: '-10px'}} /> Назад
                 </button>
-
-                <div className="flex-1 flex flex-col items-center px-4">
-                  <span className="font-extrabold text-[17px] truncate">{activeChat.name}</span>
-                  <span className="text-[11px] text-green-500 font-bold uppercase tracking-widest">в сети</span>
-                </div>
-
-                <div className="flex gap-4 text-[#007AFF]">
-                  <Video size={22} />
-                  <Phone size={22} />
+                <div style={{flex: 1, textAlign: 'center', fontWeight: '700', fontSize: '17px'}}>{activeChat.name}</div>
+                <div style={{width: '60px', display: 'flex', gap: '15px', color: '#007AFF'}}>
+                  <Video size={22} /> <Phone size={22} />
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-5 space-y-4 no-scrollbar bg-[#F2F2F7]">
-                {activeChat.messages.map((m, i) => {
-                  const isMe = m.senderId === user.id;
-                  const isSticker = m.type === 'sticker';
-                  return (
-                      <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'} animate-spring`}>
-                        <div className={`message-bubble ${isSticker ? 'sticker-msg text-7xl' : isMe ? 'my-message' : 'other-message'}`}>
-                          {m.text}
-                          <div className={`text-[10px] mt-1 text-right opacity-60 ${isMe ? 'text-white' : 'text-gray-500'}`}>
-                            {m.time}
-                          </div>
-                        </div>
-                      </div>
-                  );
-                })}
+              <div className="msg-container">
+                {activeChat.messages.map((m, i) => (
+                    <div key={i} className={`bubble ${m.senderId === user.id ? 'bubble-me' : 'bubble-other'} ${m.type === 'sticker' ? 'sticker' : ''} animate-pop`}>
+                      {m.text}
+                      {m.type !== 'sticker' && <div style={{fontSize: '10px', opacity: 0.5, textAlign: 'right', marginTop: '4px'}}>{m.time}</div>}
+                    </div>
+                ))}
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Панель стикеров */}
               {showStickers && (
-                  <div className="glass border-t p-6 h-[300px] grid grid-cols-4 gap-6 overflow-y-auto no-scrollbar animate-spring">
-                    {['🚀', '✨', '🔥', '🌈', '👻', '🐶', '🦊', '🐱', '🦄', '🍎', '🍕', '🎮', '❤️', '😎', '🤩', '👾', '⭐️', '🍀', '🍩', '🍔', '🍺', '⚡️'].map(s => (
-                        <button
-                            key={s}
-                            onClick={() => handleSendMessage(s, 'sticker')}
-                            className="text-5xl active:scale-125 transition-transform"
-                        >
-                          {s}
-                        </button>
+                  <div style={{background: 'white', height: '250px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', padding: '20px', gap: '15px', overflowY: 'auto', borderTop: '1px solid #eee'}}>
+                    {['🚀', '✨', '🔥', '🌈', '👻', '🐶', '🦊', '🐱', '🦄', '🍎', '🍕', '🎮', '❤️', '😎', '👾', '⭐️', '🍀', '🍩'].map(s => (
+                        <button key={s} onClick={() => handleSendMessage(s, 'sticker')} style={{fontSize: '40px', background: 'none', border: 'none'}}>{s}</button>
                     ))}
                   </div>
               )}
 
-              {/* Поле ввода */}
-              <div className="safe-area-bottom p-4 glass border-t flex gap-4 items-center">
-                <button
-                    onClick={() => setShowStickers(!showStickers)}
-                    className={`transition-all duration-300 ${showStickers ? 'text-[#007AFF] rotate-12' : 'text-gray-400'}`}
-                >
-                  <Smile size={30} />
-                </button>
-
-                <form
-                    onSubmit={e => { e.preventDefault(); handleSendMessage(inputText); }}
-                    className="flex-1 flex gap-3"
-                >
-                  <div className="flex-1 relative">
-                    <input
-                        value={inputText}
-                        onChange={e => setInputText(e.target.value)}
-                        placeholder="Сообщение"
-                        className="w-full bg-white/80 border border-gray-200 rounded-[22px] px-5 py-3 outline-none font-medium shadow-sm focus:border-blue-300 transition-all"
-                        onFocus={() => setShowStickers(false)}
-                    />
-                    <div className="absolute right-4 top-3 text-gray-300">
-                      <Mic size={20} />
-                    </div>
-                  </div>
-
-                  <button
-                      type="submit"
-                      disabled={!inputText.trim()}
-                      className="bg-[#007AFF] text-white rounded-full w-12 h-12 flex items-center justify-center disabled:opacity-30 shadow-lg active:scale-90 transition-all"
-                  >
-                    <Send size={20} strokeWidth={2.5} />
-                  </button>
+              <div className="bottom-bar">
+                <Smile size={28} color="#A0A0A5" onClick={() => setShowStickers(!showStickers)} />
+                <form style={{flex: 1, display: 'flex', gap: '10px'}} onSubmit={e => { e.preventDefault(); handleSendMessage(inputText); }}>
+                  <input className="msg-input" value={inputText} onChange={e => setInputText(e.target.value)} placeholder="Сообщение" onFocus={() => setShowStickers(false)} />
+                  <button type="submit" className="send-btn" disabled={!inputText.trim()}><Send size={20} /></button>
                 </form>
               </div>
             </div>
