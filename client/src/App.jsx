@@ -19,7 +19,8 @@ import {
 import {
   Search, MessageCircle, ChevronLeft, Send, Phone, Plus,
   User as UserIcon, LogOut, Video, Moon, Sun, Camera,
-  ChevronRight, Bell, Shield, Smartphone, Globe, MoreHorizontal, Edit3, Mic, Save, Square, Play
+  ChevronRight, Bell, Shield, Smartphone, Globe, MoreHorizontal, Edit3, Mic, Save, Square, Play,
+  Check, CheckCheck
 } from 'lucide-react';
 
 // --- 🔑 ТВОЯ КОНФИГУРАЦИЯ FIREBASE ---
@@ -60,12 +61,14 @@ const auraStyles = (isDark) => `
   /* Анимации */
   @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
   @keyframes slideInUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-  @keyframes springPop { 0% { transform: scale(0.85); opacity: 0; } 70% { transform: scale(1.05); } 100% { transform: scale(1); opacity: 1; } }
+  @keyframes springPop { 0% { transform: scale(0.85); opacity: 0; } 70% { transform: scale(1.02); } 100% { transform: scale(1); opacity: 1; } }
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes checkScale { 0% { transform: scale(0); } 100% { transform: scale(1); } }
 
   .view-animate { animation: slideInRight 0.35s cubic-bezier(0.32, 0.72, 0, 1); }
-  .msg-animate { animation: springPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+  .msg-animate { animation: springPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.2) forwards; }
   .fade-animate { animation: fadeIn 0.3s ease; }
+  .check-animate { animation: checkScale 0.2s ease forwards; }
 
   /* Авторизация */
   .auth-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; }
@@ -92,10 +95,13 @@ const auraStyles = (isDark) => `
   .ios-item:not(:last-child)::after { content: ''; position: absolute; left: 70px; right: 0; bottom: 0; height: 0.5px; background: var(--sep); }
 
   /* Сообщения */
-  .chat-scroll { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; background: ${isDark ? '#000' : '#F2F2F7'}; }
-  .chat-bubble { max-width: 75%; padding: 10px 14px; border-radius: 18px; font-size: 16px; position: relative; word-wrap: break-word; line-height: 1.4; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+  .chat-scroll { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; background: ${isDark ? '#000' : '#F2F2F7'}; }
+  .chat-bubble { max-width: 75%; padding: 10px 14px; border-radius: 18px; font-size: 16px; position: relative; word-wrap: break-word; line-height: 1.4; box-shadow: 0 1px 2px rgba(0,0,0,0.1); margin-bottom: 4px; }
   .bubble-me { background: var(--ios-blue); color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
   .bubble-other { background: ${isDark ? '#1C1C1E' : '#FFFFFF'}; color: var(--text-main); align-self: flex-start; border-bottom-left-radius: 4px; }
+
+  .status-row { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 2px; }
+  .msg-time { font-size: 10px; opacity: 0.6; }
 
   .tab-bar { height: 85px; background: var(--nav-bg); backdrop-filter: blur(25px); border-top: 0.5px solid var(--sep); display: flex; justify-content: space-around; padding-top: 10px; }
   .tab-item { display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--text-sec); cursor: pointer; border: none; background: none; transition: transform 0.2s; }
@@ -110,7 +116,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [isDark, setIsDark] = useState(localStorage.getItem('aura_dark') === 'true');
   const [view, setView] = useState('chats');
-  const [selectedPeer, setSelectedPeer] = useState(null); // Тот, с кем общаемся
+  const [selectedPeer, setSelectedPeer] = useState(null);
 
   const [allUsers, setAllUsers] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -149,18 +155,31 @@ export default function App() {
   useEffect(() => {
     if (!firebaseUser) return;
     const unsubUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (s) => {
-      setAllUsers(s.docs.map(d => d.data()));
+      setAllUsers(s.docs.map(d => ({ id: d.id, ...d.data() })));
     });
     const unsubMsgs = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (s) => {
-      setMessages(s.docs.map(d => d.data()).sort((a,b) => a.ts - b.ts));
+      // Мапим с сохранением ID для обновлений (статус прочтения)
+      const msgsData = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.ts - b.ts);
+      setMessages(msgsData);
     });
     return () => { unsubUsers(); unsubMsgs(); };
   }, [firebaseUser]);
 
+  // 3. Автоматическая пометка прочитанным
+  useEffect(() => {
+    if (view === 'chat_room' && selectedPeer && user && selectedPeer.username !== 'global') {
+      const unread = messages.filter(m => m.uid === selectedPeer.username && m.to === user.username && !m.read);
+      unread.forEach(async (msg) => {
+        const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'messages', msg.id);
+        await updateDoc(msgRef, { read: true });
+      });
+    }
+  }, [view, selectedPeer, messages, user]);
+
   // Автопрокрутка вниз
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, view, selectedPeer]);
 
@@ -191,18 +210,17 @@ export default function App() {
 
   const sendMessage = async (val) => {
     if (!val.trim() || !user || !selectedPeer) return;
-    const isGlobal = selectedPeer.username === 'global';
     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
       text: val,
       uid: user.username,
       to: selectedPeer.username,
       ts: Date.now(),
-      name: user.name
+      name: user.name,
+      read: false
     });
     setInput('');
   };
 
-  // Фильтрация сообщений для текущего чата
   const currentMessages = messages.filter(m => {
     if (!selectedPeer) return false;
     if (selectedPeer.username === 'global') return m.to === 'global';
@@ -233,7 +251,7 @@ export default function App() {
                 </div>
             )}
             <button className="btn-primary" onClick={handleAuth} disabled={loading}>{loading ? 'Загрузка...' : 'Продолжить'}</button>
-            <button className="auth-toggle-btn" style={{background: 'none', border: 'none', color: '#007AFF', marginTop: 20, cursor: 'pointer'}} onClick={() => { setAuthStep(authStep === 'reg' ? 'login' : 'reg'); setErrorMsg(''); }}>
+            <button className="auth-toggle-btn" style={{background: 'none', border: 'none', color: '#007AFF', marginTop: 20, cursor: 'pointer', fontWeight: 600}} onClick={() => { setAuthStep(authStep === 'reg' ? 'login' : 'reg'); setErrorMsg(''); }}>
               {authStep === 'reg' ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Создать'}
             </button>
           </div>
@@ -303,24 +321,31 @@ export default function App() {
                     <b style={{fontSize: '17px'}}>{selectedPeer.name}</b>
                     <span style={{fontSize: '11px', color: '#34C759', fontWeight: '600'}}>в сети</span>
                   </div>
-                  {selectedPeer.avatar ? <img src={selectedPeer.avatar} style={{width: 36, height: 36, borderRadius: '50%'}} /> : <div style={{width: 36}}></div>}
+                  {selectedPeer.avatar ? <img src={selectedPeer.avatar} style={{width: 36, height: 36, borderRadius: '50%'}} /> : <div style={{width: 36, height: 36, background: '#007AFF', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center'}}><Globe size={18} color="white" /></div>}
                 </div>
 
                 <div ref={scrollRef} className="chat-scroll">
-                  <div style={{flex: 1}}></div> {/* Толкает сообщения вниз */}
+                  <div style={{flex: 1}}></div> {/* Наполнитель для выталкивания сообщений вниз */}
                   {currentMessages.length === 0 && (
                       <div className="fade-animate" style={{textAlign: 'center', padding: 40, color: 'var(--text-sec)', fontSize: 14}}>
                         Здесь будет ваша переписка с {selectedPeer.name}
                       </div>
                   )}
                   {currentMessages.map((m, i) => (
-                      <div key={i} className={`chat-bubble msg-animate ${m.uid === user.username ? 'bubble-me' : 'bubble-other'}`}>
+                      <div key={m.id || i} className={`chat-bubble msg-animate ${m.uid === user.username ? 'bubble-me' : 'bubble-other'}`}>
                         {selectedPeer.username === 'global' && m.uid !== user.username && (
                             <div style={{fontSize: '11px', fontWeight: '700', marginBottom: '2px', color: '#FF9500'}}>{m.name}</div>
                         )}
                         <div>{m.text}</div>
-                        <div style={{fontSize: '10px', opacity: 0.6, textAlign: 'right', marginTop: '2px'}}>
-                          {m.ts ? new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}
+                        <div className="status-row">
+                    <span className="msg-time">
+                      {m.ts ? new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}
+                    </span>
+                          {m.uid === user.username && selectedPeer.username !== 'global' && (
+                              <div className="check-animate">
+                                {m.read ? <CheckCheck size={14} color="#34C759" /> : <Check size={14} color="rgba(255,255,255,0.7)" />}
+                              </div>
+                          )}
                         </div>
                       </div>
                   ))}
