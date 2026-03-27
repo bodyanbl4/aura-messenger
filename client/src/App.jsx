@@ -14,16 +14,31 @@ import {
   collection,
   onSnapshot,
   addDoc,
-  updateDoc
+  updateDoc,
+  deleteDoc
 } from 'firebase/firestore';
 import {
-  Search, MessageCircle, ChevronLeft, Send, Phone, Plus,
-  User as UserIcon, LogOut, Video, Moon, Sun, Camera,
-  ChevronRight, Bell, Shield, Smartphone, Globe, MoreHorizontal, Edit3, Mic, Save, Square, Play,
-  Check, CheckCheck, X, Heart, ThumbsUp, Flame, Laugh
+  Search,
+  MessageCircle,
+  ChevronLeft,
+  Send,
+  Settings as UserIcon,
+  LogOut,
+  Camera,
+  ChevronRight,
+  Globe,
+  Mic,
+  Square,
+  Check,
+  CheckCheck,
+  Paperclip,
+  Trash,
+  Trash2,
+  Bell,
+  X
 } from 'lucide-react';
 
-// --- 🔑 ТВОЯ КОНФИГУРАЦИЯ FIREBASE ---
+// --- 🔑 КОНФИГУРАЦИЯ FIREBASE ---
 const firebaseConfig = {
   apiKey: "AIzaSyBI5cMQ-zwjU1s4je2zzqBPpepSfBy0mKg",
   authDomain: "aura-748c8.firebaseapp.com",
@@ -36,141 +51,40 @@ const firebaseConfig = {
 
 const envConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : firebaseConfig;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'aura-pro-v26';
-
 const app = !getApps().length ? initializeApp(envConfig) : getApps()[0];
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-const auraStyles = (isDark) => `
-  :root { 
-    --ios-blue: #007AFF; 
-    --ios-bg: ${isDark ? '#000000' : '#F2F2F7'};
-    --card-bg: ${isDark ? '#1C1C1E' : '#FFFFFF'};
-    --text-main: ${isDark ? '#FFFFFF' : '#000000'};
-    --text-sec: #8E8E93;
-    --sep: ${isDark ? '#38383A' : '#C6C6C8'};
-    --nav-bg: ${isDark ? 'rgba(28, 28, 30, 0.85)' : 'rgba(255, 255, 255, 0.85)'};
-  }
-  
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #000; color: var(--text-main); overflow: hidden; }
-  
-  .app-container { width: 100vw; height: 100vh; display: flex; justify-content: center; background: #000; }
-  .phone-screen { 
-    width: 100%; max-width: 500px; height: 100%; background: var(--ios-bg); 
-    position: relative; display: flex; flex-direction: column; overflow: hidden; 
-  }
-
-  .view-container { flex: 1; display: flex; flex-direction: column; height: 100%; animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
-  @keyframes slideIn { from { transform: translateX(30px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-  @keyframes popIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-
-  .ios-input { 
-    width: 100%; padding: 14px 16px; border-radius: 12px; 
-    border: 1.5px solid var(--sep); background: ${isDark ? '#2C2C2E' : '#FFFFFF'}; 
-    color: var(--text-main); font-size: 16px; outline: none; transition: all 0.2s;
-  }
-
-  .btn-primary { 
-    width: 100%; padding: 16px; background: var(--ios-blue); color: white; 
-    border: none; border-radius: 16px; font-weight: 700; font-size: 17px; cursor: pointer;
-  }
-
-  .nav-bar { 
-    padding: 55px 16px 15px; background: var(--nav-bg); backdrop-filter: blur(25px); 
-    border-bottom: 0.5px solid var(--sep); display: flex; align-items: center; 
-    justify-content: space-between; position: sticky; top: 0; z-index: 50; 
-  }
-
-  .ios-list { background: var(--card-bg); margin: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-  .ios-item { 
-    display: flex; align-items: center; padding: 12px 16px; cursor: pointer; 
-    border: none; background: none; text-align: left; width: 100%; color: var(--text-main); position: relative;
-  }
-  .ios-item:not(:last-child)::after { content: ''; position: absolute; left: 70px; right: 0; bottom: 0; height: 0.5px; background: var(--sep); }
-
-  .chat-scroll { 
-    flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;
-    background: ${isDark ? '#000' : '#F2F2F7'}; 
-  }
-  .chat-bubble { 
-    max-width: 80%; width: fit-content; padding: 10px 14px; border-radius: 18px; font-size: 16px; 
-    position: relative; word-wrap: break-word; line-height: 1.4; word-break: break-word;
-    animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    box-shadow: 0 1px 2px rgba(0,0,0,0.08);
-  }
-  .bubble-me { background: var(--ios-blue); color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
-  .bubble-other { background: ${isDark ? '#1C1C1E' : '#FFFFFF'}; color: var(--text-main); align-self: flex-start; border-bottom-left-radius: 4px; }
-
-  .circle-video { width: 220px; height: 220px; border-radius: 50%; object-fit: cover; border: 3px solid var(--ios-blue); box-shadow: 0 4px 15px rgba(0,0,0,0.2); background: #000; }
-  
-  .recording-preview-overlay {
-    position: absolute; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    backdrop-filter: blur(10px);
-  }
-
-  .recording-circle {
-    width: 280px; height: 280px; border-radius: 50%; border: 4px solid #FF3B30;
-    overflow: hidden; box-shadow: 0 0 40px rgba(255,59,48,0.4); background: #000;
-  }
-  
-  .tab-bar { 
-    height: 85px; background: var(--nav-bg); backdrop-filter: blur(25px); 
-    border-top: 0.5px solid var(--sep); display: flex; justify-content: space-around; 
-    padding-top: 10px; flex-shrink: 0; z-index: 100;
-  }
-  .tab-item { 
-    display: flex; flex-direction: column; align-items: center; gap: 4px; 
-    color: var(--text-sec); cursor: pointer; border: none; background: none; flex: 1;
-  }
-  .tab-item.active { color: var(--ios-blue); }
-
-  .avatar { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 0.5px solid var(--sep); }
-  .avatar-huge { width: 110px; height: 110px; border-radius: 50%; object-fit: cover; margin: 0 auto 10px; border: 3px solid var(--ios-blue); display: block; background: #eee; }
-  
-  .reaction-picker {
-    position: absolute; background: var(--card-bg); border-radius: 24px; 
-    padding: 8px 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); display: flex; gap: 12px;
-    z-index: 200; top: -55px; animation: popIn 0.2s ease;
-  }
-  .reaction-badge {
-    position: absolute; bottom: -8px; right: 10px; background: var(--card-bg); 
-    border-radius: 12px; padding: 2px 6px; font-size: 11px; border: 1px solid var(--sep);
-    display: flex; gap: 3px; align-items: center;
-  }
-
-  .error-toast {
-    position: absolute; top: 100px; left: 20px; right: 20px; background: #FF3B30; color: white;
-    padding: 12px; border-radius: 12px; text-align: center; z-index: 2000; animation: slideInUp 0.3s ease;
-  }
-  @keyframes slideInUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-`;
-
 export default function App() {
+  // --- СОСТОЯНИЯ ---
   const [firebaseUser, setFirebaseUser] = useState(null);
   const [user, setUser] = useState(null);
-  const [isDark, setIsDark] = useState(localStorage.getItem('aura_dark') === 'true');
-  const [view, setView] = useState('chats');
+  const [view, setView] = useState('chats'); // 'chats', 'chat_room', 'settings'
   const [selectedPeer, setSelectedPeer] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
-  const [formData, setFormData] = useState({ username: '', password: '', name: '', bio: '' });
+  const [formData, setFormData] = useState({ username: '', password: '', name: '' });
   const [loading, setLoading] = useState(false);
   const [authStep, setAuthStep] = useState('login');
-  const [activeReactionId, setActiveReactionId] = useState(null);
   const [globalError, setGlobalError] = useState(null);
 
+  // Медиа & Запись
+  const [mode, setMode] = useState('voice'); // 'voice' или 'video'
   const [isRecording, setIsRecording] = useState(null);
   const [recTime, setRecTime] = useState(0);
+  const [contextMenu, setContextMenu] = useState(null);
 
   const scrollRef = useRef();
+  const fileInputRef = useRef(null);
   const mediaRecorder = useRef(null);
   const videoPreviewRef = useRef(null);
   const audioChunks = useRef([]);
   const activeStream = useRef(null);
+  const pressTimer = useRef(null);
+  const isHolding = useRef(false);
 
+  // --- ИНИЦИАЛИЗАЦИЯ И FIREBASE ---
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -179,6 +93,7 @@ export default function App() {
         } else { await signInAnonymously(auth); }
       } catch (e) { console.error(e); }
     };
+
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setFirebaseUser(u);
       if (u) {
@@ -191,7 +106,9 @@ export default function App() {
 
   useEffect(() => {
     if (!firebaseUser) return;
-    onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (s) => {
+
+    // Подписка на пользователей
+    const unsubUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (s) => {
       const users = s.docs.map(d => ({ id: d.id, ...d.data() }));
       setAllUsers(users);
       if (user) {
@@ -202,15 +119,31 @@ export default function App() {
         }
       }
     });
-    onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (s) => {
+
+    // Подписка на сообщения
+    const unsubMsgs = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (s) => {
       setMessages(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.ts - b.ts));
     });
-  }, [firebaseUser]);
 
+    return () => { unsubUsers(); unsubMsgs(); };
+  }, [firebaseUser, user?.username]);
+
+  // Скролл вниз при новых сообщениях
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, view, selectedPeer]);
 
+  // Фикс черного экрана при записи видео
+  useEffect(() => {
+    if (activeStream.current && videoPreviewRef.current && isRecording === 'video') {
+      videoPreviewRef.current.srcObject = activeStream.current;
+      videoPreviewRef.current.onloadedmetadata = () => {
+        videoPreviewRef.current.play().catch(console.error);
+      };
+    }
+  }, [isRecording]);
+
+  // --- ЛОГИКА АВТОРИЗАЦИИ ---
   const handleAuth = async () => {
     const { username, password, name } = formData;
     if (!username || !password) return;
@@ -219,17 +152,28 @@ export default function App() {
       const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', username.toLowerCase().trim());
       const snap = await getDoc(userRef);
       if (authStep === 'reg') {
-        if (snap.exists()) return setLoading(false);
+        if (snap.exists()) {
+          setGlobalError("Пользователь уже существует!");
+          setTimeout(() => setGlobalError(null), 3000);
+          return setLoading(false);
+        }
         const newUser = {
-          username: username.toLowerCase().trim(), password, name: name || username,
+          username: username.toLowerCase().trim(),
+          password,
+          name: name || username,
           avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`,
-          bio: 'В Aura'
+          privacy: 'online'
         };
         await setDoc(userRef, newUser);
-        setUser(newUser); localStorage.setItem('aura_user', JSON.stringify(newUser));
+        setUser(newUser);
+        localStorage.setItem('aura_user', JSON.stringify(newUser));
       } else {
         if (snap.exists() && snap.data().password === password) {
-          setUser(snap.data()); localStorage.setItem('aura_user', JSON.stringify(snap.data()));
+          setUser(snap.data());
+          localStorage.setItem('aura_user', JSON.stringify(snap.data()));
+        } else {
+          setGlobalError("Неверный логин или пароль!");
+          setTimeout(() => setGlobalError(null), 3000);
         }
       }
     } catch (e) { console.error(e); }
@@ -244,24 +188,23 @@ export default function App() {
     } catch (e) { console.error("Update fail:", e); }
   };
 
-  const onAvatarChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => updateProfile({ avatar: reader.result });
-    reader.readAsDataURL(file);
-  };
-
+  // --- ЛОГИКА СООБЩЕНИЙ И МЕДИА ---
   const sendMessage = async (val, type = 'text') => {
     if (!val.trim() && type === 'text') return;
     try {
       if (val.length > 950000) {
-        setGlobalError("Сообщение слишком большое.");
+        setGlobalError("Файл слишком большой.");
         setTimeout(() => setGlobalError(null), 3000);
         return;
       }
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
-        text: val, uid: user.username, to: selectedPeer.username, ts: Date.now(), name: user.name, type, reactions: {}
+        text: val,
+        uid: user.username,
+        to: selectedPeer.username,
+        ts: Date.now(),
+        name: user.name,
+        type,
+        hiddenFor: []
       });
       setInput('');
     } catch (e) {
@@ -270,32 +213,41 @@ export default function App() {
     }
   };
 
-  const addReaction = async (msgId, emoji) => {
-    const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId);
-    const msg = messages.find(m => m.id === msgId);
-    const reactions = { ...(msg.reactions || {}) };
-    reactions[user.username] = emoji;
-    await updateDoc(msgRef, { reactions });
-    setActiveReactionId(null);
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => sendMessage(reader.result, 'image');
+    reader.readAsDataURL(file);
   };
 
+  const deleteMessage = async (deleteType) => {
+    if (!contextMenu) return;
+    const { msgId } = contextMenu;
+    const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId);
+
+    try {
+      if (deleteType === 'both') {
+        await deleteDoc(msgRef);
+      } else {
+        const msg = messages.find(m => m.id === msgId);
+        if (msg) {
+          await updateDoc(msgRef, { hiddenFor: [...(msg.hiddenFor || []), user.username] });
+        }
+      }
+    } catch (e) { console.error("Delete error:", e); }
+    setContextMenu(null);
+  };
+
+  // --- ЗАПИСЬ КРУЖКОВ И ГОЛОСОВЫХ ---
   const startMediaRecording = async (type) => {
     try {
       const constraints = {
         audio: true,
-        video: type === 'video' ? {
-          width: { ideal: 400 },
-          height: { ideal: 400 },
-          facingMode: 'user'
-        } : false
+        video: type === 'video' ? { facingMode: 'user', width: 300, height: 300 } : false
       };
-
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       activeStream.current = stream;
-
-      if (type === 'video' && videoPreviewRef.current) {
-        videoPreviewRef.current.srcObject = stream;
-      }
 
       const options = { mimeType: type === 'video' ? 'video/webm;codecs=vp8' : 'audio/webm' };
       mediaRecorder.current = new MediaRecorder(stream, options);
@@ -306,6 +258,13 @@ export default function App() {
       };
 
       mediaRecorder.current.onstop = () => {
+        if (mediaRecorder.current.cancelRecord) {
+          // Если отменено, не отправляем
+          stream.getTracks().forEach(t => t.stop());
+          activeStream.current = null;
+          return;
+        }
+
         const blob = new Blob(audioChunks.current, { type: type === 'video' ? 'video/webm' : 'audio/webm' });
         const reader = new FileReader();
         reader.onloadend = () => {
@@ -322,7 +281,8 @@ export default function App() {
       const t = setInterval(() => setRecTime(p => p + 1), 1000);
       mediaRecorder.current.timer = t;
     } catch (e) {
-      alert("Нет доступа к камере");
+      setGlobalError("Нет доступа к камере/микрофону");
+      setTimeout(() => setGlobalError(null), 3000);
     }
   };
 
@@ -334,181 +294,378 @@ export default function App() {
     }
   };
 
+  const cancelMediaRecording = () => {
+    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
+      mediaRecorder.current.cancelRecord = true; // Флаг для отмены
+      mediaRecorder.current.stop();
+      clearInterval(mediaRecorder.current.timer);
+      setIsRecording(null);
+    }
+  };
+
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
+  // --- ОБРАБОТЧИКИ НАЖАТИЙ (ТАП И УДЕРЖАНИЕ) ---
+  const handlePointerDown = (e) => {
+    isHolding.current = false;
+    pressTimer.current = setTimeout(() => {
+      isHolding.current = true;
+      startMediaRecording(mode);
+    }, 300); // 300мс = удержание
+  };
+
+  const handlePointerUp = () => {
+    clearTimeout(pressTimer.current);
+    if (isHolding.current) {
+      stopMediaRecording(); // Завершаем и отправляем
+    } else {
+      // Одиночный тап - переключаем режим
+      setMode(prev => prev === 'voice' ? 'video' : 'voice');
+    }
+    isHolding.current = false;
+  };
+
+  // --- ФИЛЬТРАЦИЯ СООБЩЕНИЙ ---
   const currentMessages = messages.filter(m => {
     if (!selectedPeer) return false;
+    // Исключаем удаленные "только для меня"
+    if (m.hiddenFor && m.hiddenFor.includes(user.username)) return false;
+
     if (selectedPeer.username === 'global') return m.to === 'global';
     return (m.uid === user.username && m.to === selectedPeer.username) ||
         (m.uid === selectedPeer.username && m.to === user.username);
   });
 
-  if (!user) return (
-      <div className="app-container">
-        <style>{auraStyles(isDark)}</style>
-        <div className="auth-wrap">
-          <div className="auth-card" style={{animation: 'popIn 0.5s ease'}}>
-            <div style={{width: 70, height: 70, background: 'var(--ios-blue)', borderRadius: 20, margin: '0 auto 25px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 20px rgba(0,122,255,0.2)'}}><MessageCircle color="white" size={36} /></div>
-            <h2 style={{textAlign: 'center', marginBottom: 25}}>{authStep === 'reg' ? 'Регистрация' : 'Вход в Aura'}</h2>
-            <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
-              <input className="ios-input" placeholder="Логин" onChange={e => setFormData({...formData, username: e.target.value})} />
-              <input className="ios-input" type="password" placeholder="Пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
-              {authStep === 'reg' && <input className="ios-input" placeholder="Ваше имя" onChange={e => setFormData({...formData, name: e.target.value})} />}
-              <button className="btn-primary" style={{marginTop: 10}} onClick={handleAuth} disabled={loading}>{loading ? '...' : 'Продолжить'}</button>
-              <button style={{background: 'none', border: 'none', color: 'var(--ios-blue)', marginTop: 15, cursor: 'pointer', fontWeight: 600}} onClick={() => setAuthStep(authStep === 'reg' ? 'login' : 'reg')}>
+  // --- ЭКРАН АВТОРИЗАЦИИ ---
+  if (!user) {
+    return (
+        <div className="flex flex-col items-center justify-center h-screen bg-[#f0f0f0] font-sans">
+          {globalError && <div className="absolute top-10 bg-red-500 text-white px-6 py-3 rounded-2xl shadow-lg z-50 animate-in slide-in-from-top">{globalError}</div>}
+          <div className="bg-white p-8 rounded-3xl shadow-xl w-[90%] max-w-[400px] animate-in zoom-in-95">
+            <div className="w-20 h-20 bg-[#007aff] rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-500/30">
+              <Send size={40} className="text-white ml-2" />
+            </div>
+            <h2 className="text-2xl font-bold text-center mb-6">{authStep === 'reg' ? 'Регистрация' : 'Вход в Telegram'}</h2>
+            <div className="space-y-4 flex flex-col">
+              <input
+                  className="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-blue-500 outline-none transition-all text-[16px]"
+                  placeholder="Логин"
+                  onChange={e => setFormData({...formData, username: e.target.value})}
+              />
+              <input
+                  className="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-blue-500 outline-none transition-all text-[16px]"
+                  type="password"
+                  placeholder="Пароль"
+                  onChange={e => setFormData({...formData, password: e.target.value})}
+              />
+              {authStep === 'reg' && (
+                  <input
+                      className="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-blue-500 outline-none transition-all text-[16px]"
+                      placeholder="Ваше имя"
+                      onChange={e => setFormData({...formData, name: e.target.value})}
+                  />
+              )}
+              <button
+                  className="w-full py-3.5 bg-[#007aff] text-white rounded-2xl font-bold text-[17px] active:scale-[0.98] transition-all shadow-md mt-2"
+                  onClick={handleAuth}
+                  disabled={loading}
+              >
+                {loading ? 'Загрузка...' : 'Продолжить'}
+              </button>
+              <button
+                  className="text-[#007aff] font-semibold mt-4 py-2"
+                  onClick={() => setAuthStep(authStep === 'reg' ? 'login' : 'reg')}
+              >
                 {authStep === 'reg' ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Создать'}
               </button>
             </div>
           </div>
         </div>
-      </div>
-  );
+    );
+  }
 
+  // --- ГЛАВНЫЙ ЭКРАН ПРИЛОЖЕНИЯ ---
   return (
-      <div className="app-container">
-        <style>{auraStyles(isDark)}</style>
-        <div className="phone-screen">
+      <div className="flex flex-col h-screen bg-[#000] font-sans justify-center items-center overflow-hidden">
+        {globalError && <div className="fixed top-10 bg-red-500 text-white px-6 py-3 rounded-2xl shadow-lg z-[9999] animate-in slide-in-from-top">{globalError}</div>}
 
-          {globalError && <div className="error-toast">{globalError}</div>}
+        {/* Окно "телефона" */}
+        <div className="w-full max-w-[500px] h-full bg-[#f2f2f7] relative flex flex-col overflow-hidden shadow-2xl">
 
-          {isRecording === 'video' && (
-              <div className="recording-preview-overlay">
-                <div className="recording-circle">
-                  <video ref={videoPreviewRef} autoPlay muted playsInline style={{width: '100%', height: '100%', objectFit: 'cover'}} />
-                </div>
-                <div style={{marginTop: 25, color: 'white', fontSize: 18, fontWeight: 700}}>Запись кружка... {recTime}с</div>
-                <button onClick={stopMediaRecording} style={{marginTop: 30, background: '#FF3B30', color: 'white', border: 'none', padding: '16px 32px', borderRadius: 32, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 10}}>
-                  <Square size={20} fill="white" /> Стоп и отправить
-                </button>
-              </div>
-          )}
-
+          {/* --- ЭКРАН СПИСКА ЧАТОВ --- */}
           {view === 'chats' && (
-              <div className="view-container">
-                <div className="nav-bar"><div style={{fontSize: 32, fontWeight: 800}}>Чаты</div><Edit3 size={24} color="var(--ios-blue)" /></div>
-                <div style={{padding: '0 16px 12px'}}><div style={{background: isDark ? '#1C1C1E' : '#E3E3E8', borderRadius: '10px', padding: '10px', display: 'flex', alignItems: 'center', gap: '8px'}}><Search size={18} color="#8E8E93" /><input placeholder="Поиск" style={{background: 'none', border: 'none', outline: 'none', color: 'var(--text-main)', width: '100%', fontSize: 16}} /></div></div>
-                <div style={{flex: 1, overflowY: 'auto'}}>
-                  <button className="ios-item" onClick={() => { setSelectedPeer({name: 'Общий чат', username: 'global'}); setView('chat_room'); }}>
-                    <div style={{background: 'var(--ios-blue)', width: 52, height: 52, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 14}}><Globe size={26} color="white"/></div>
-                    <div style={{flex: 1}}><b style={{fontSize: 17}}>Общий чат</b><div style={{fontSize: 14, color: 'var(--text-sec)'}}>Групповая беседа • Online</div></div>
+              <div className="flex flex-col h-full bg-white animate-in slide-in-from-left-4 duration-300">
+                <div className="pt-12 pb-2 px-4 bg-white/80 backdrop-blur-2xl border-b border-gray-200 z-10 sticky top-0">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-blue-500 font-medium text-[17px]">Изм.</span>
+                    <span className="font-bold text-[17px]">Чаты</span>
+                    <span className="text-blue-500"><Search size={22} /></span>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto pb-20">
+                  {/* Общий чат */}
+                  <button
+                      className="w-full flex items-center px-4 py-2 hover:bg-gray-50 transition-colors active:bg-gray-100"
+                      onClick={() => { setSelectedPeer({name: 'Общий чат', username: 'global', privacy: 'online'}); setView('chat_room'); }}
+                  >
+                    <div className="w-[60px] h-[60px] bg-gradient-to-tr from-blue-400 to-blue-600 rounded-full flex items-center justify-center mr-3 shadow-sm shrink-0">
+                      <Globe size={30} color="white"/>
+                    </div>
+                    <div className="flex-1 text-left border-b border-gray-100 py-3">
+                      <div className="flex justify-between items-baseline">
+                        <b className="text-[17px] font-semibold">Общий чат</b>
+                      </div>
+                      <div className="text-[15px] text-gray-500 truncate mt-0.5">Глобальная беседа</div>
+                    </div>
                   </button>
+
+                  {/* Список пользователей */}
                   {allUsers.filter(u => u.username !== user.username).map(u => (
-                      <button key={u.username} className="ios-item" onClick={() => { setSelectedPeer(u); setView('chat_room'); }}>
-                        <img src={u.avatar} className="avatar" />
-                        <div style={{flex: 1}}><b style={{fontSize: 17}}>{u.name}</b><div style={{fontSize: 14, color: 'var(--text-sec)'}}>@{u.username}</div></div>
-                        <ChevronRight size={18} color="#C6C6C8" />
+                      <button
+                          key={u.username}
+                          className="w-full flex items-center px-4 py-2 hover:bg-gray-50 transition-colors active:bg-gray-100"
+                          onClick={() => { setSelectedPeer(u); setView('chat_room'); }}
+                      >
+                        <img src={u.avatar} className="w-[60px] h-[60px] rounded-full object-cover mr-3 shadow-sm shrink-0 border border-gray-100" alt="avatar" />
+                        <div className="flex-1 text-left border-b border-gray-100 py-3">
+                          <div className="flex justify-between items-baseline">
+                            <b className="text-[17px] font-semibold">{u.name}</b>
+                          </div>
+                          <div className="text-[15px] text-gray-500 truncate mt-0.5">@{u.username}</div>
+                        </div>
                       </button>
                   ))}
                 </div>
               </div>
           )}
 
+          {/* --- ЭКРАН НАСТРОЕК --- */}
           {view === 'settings' && (
-              <div className="view-container">
-                <div className="nav-bar"><div style={{fontSize: 32, fontWeight: 800}}>Настройки</div></div>
-                <div className="ios-list" style={{padding: '24px 0'}}>
-                  <div style={{textAlign: 'center'}}>
-                    <div style={{position: 'relative', display: 'inline-block', marginBottom: 12}}>
-                      <img src={user.avatar} className="avatar-huge" key={user.avatar} />
-                      <label style={{position: 'absolute', bottom: 5, right: 0, background: 'var(--ios-blue)', borderRadius: '50%', padding: 8, cursor: 'pointer', border: '4px solid var(--card-bg)', boxShadow: '0 2px 10px rgba(0,0,0,0.1)'}}>
-                        <Camera size={18} color="white" />
-                        <input type="file" hidden accept="image/*" onChange={onAvatarChange} />
-                      </label>
-                    </div>
-                    <h3 style={{fontSize: 22, fontWeight: 800}}>{user.name}</h3>
-                    <p style={{color: 'var(--text-sec)', fontSize: 15}}>@{user.username}</p>
-                  </div>
+              <div className="flex flex-col h-full bg-[#f2f2f7] animate-in slide-in-from-right-4 duration-300">
+                <div className="pt-12 pb-4 px-4 bg-white border-b border-gray-200 z-10 sticky top-0 flex justify-center items-center">
+                  <span className="font-bold text-[17px]">Настройки</span>
                 </div>
-                <div className="ios-list">
-                  <button className="ios-item" onClick={() => { setIsDark(!isDark); localStorage.setItem('aura_dark', !isDark); }}>
-                    <div style={{background: '#5856D6', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 12, color: 'white'}}><Moon size={18}/></div>
-                    <div style={{flex: 1}}>Темная тема</div>
-                    <div style={{color: 'var(--text-sec)'}}>{isDark ? 'Вкл' : 'Выкл'}</div>
-                  </button>
-                  <button className="ios-item" onClick={() => { localStorage.clear(); window.location.reload(); }} style={{color: '#FF3B30'}}>
-                    <div style={{background: '#FF3B30', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 12, color: 'white'}}><LogOut size={18}/></div>
-                    Выйти
-                  </button>
+                <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                  <div className="bg-white rounded-2xl shadow-sm p-4 text-center">
+                    <div className="relative inline-block mb-3">
+                      <img src={user.avatar} className="w-[100px] h-[100px] rounded-full object-cover border border-gray-200" alt="me" />
+                    </div>
+                    <h3 className="text-xl font-bold">{user.name}</h3>
+                    <p className="text-gray-500 text-sm mt-1">@{user.username}</p>
+                  </div>
+
+                  <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+                    <div className="px-4 py-3 border-b border-gray-100 flex justify-between items-center">
+                      <span className="text-[16px]">Статус сети</span>
+                      <select
+                          value={user.privacy || 'online'}
+                          onChange={(e) => updateProfile({ privacy: e.target.value })}
+                          className="bg-transparent text-[#007aff] font-medium text-[16px] outline-none text-right"
+                      >
+                        <option value="online">В сети</option>
+                        <option value="recently">Был(а) недавно</option>
+                      </select>
+                    </div>
+                    <button
+                        onClick={() => { localStorage.clear(); window.location.reload(); }}
+                        className="w-full px-4 py-3 flex items-center text-red-500 hover:bg-red-50"
+                    >
+                      <LogOut size={20} className="mr-3"/>
+                      <span className="text-[16px] font-medium">Выйти из аккаунта</span>
+                    </button>
+                  </div>
+                  <p className="text-xs text-center text-gray-400">Настройка «Был(а) недавно» скроет ваше точное присутствие от других.</p>
                 </div>
               </div>
           )}
 
+          {/* --- ЭКРАН ЧАТА --- */}
           {view === 'chat_room' && selectedPeer && (
-              <div className="view-container">
-                <div className="nav-bar">
-                  <button onClick={() => setView('chats')} style={{background: 'none', border: 'none', color: 'var(--ios-blue)', cursor: 'pointer'}}><ChevronLeft size={34} /></button>
-                  <div style={{textAlign: 'center', flex: 1}}>
-                    <b style={{fontSize: 17, display: 'block'}}>{selectedPeer.name}</b>
-                    <div style={{fontSize: 12, color: '#34C759', fontWeight: 600}}>в сети</div>
+              <div className="flex flex-col h-full bg-[#e6ebf0] bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-fixed z-20 absolute inset-0 animate-in slide-in-from-right duration-300">
+
+                {/* Header Чата */}
+                <div className="bg-white/85 backdrop-blur-xl border-b border-gray-300 h-20 pt-8 flex items-center px-2 shrink-0 z-30 shadow-sm">
+                  <button onClick={() => setView('chats')} className="text-[#007aff] flex items-center p-1 w-20">
+                    <ChevronLeft size={32} />
+                    <span className="text-[17px] -ml-1">Назад</span>
+                  </button>
+                  <div className="flex-1 flex flex-col items-center">
+                    <div className="font-semibold text-[17px] leading-tight">{selectedPeer.name}</div>
+                    <div className={`text-[12px] ${selectedPeer.privacy === 'recently' ? 'text-gray-500' : 'text-[#007aff]'}`}>
+                      {selectedPeer.username === 'global' ? 'чат' : (selectedPeer.privacy === 'recently' ? 'был(а) недавно' : 'в сети')}
+                    </div>
                   </div>
-                  <img src={selectedPeer.avatar || ''} className="avatar" style={{width: 38, height: 38}} />
+                  <div className="w-20 flex justify-end pr-2">
+                    <img src={selectedPeer.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedPeer.username}`} className="w-9 h-9 rounded-full object-cover border border-gray-200" alt="peer" />
+                  </div>
                 </div>
 
-                <div ref={scrollRef} className="chat-scroll">
-                  <div style={{flex: 1}}></div>
+                {/* Область сообщений */}
+                <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-2 pb-6">
+                  {currentMessages.length === 0 && (
+                      <div className="text-center text-black/40 text-sm mt-10 bg-white/50 w-fit mx-auto px-4 py-1.5 rounded-full">Нет сообщений</div>
+                  )}
                   {currentMessages.map((m) => (
                       <div
                           key={m.id}
-                          className={`chat-bubble ${m.uid === user.username ? 'bubble-me' : 'bubble-other'}`}
-                          onClick={() => setActiveReactionId(m.id === activeReactionId ? null : m.id)}
+                          onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.pageX, y: e.pageY, msgId: m.id }); }}
+                          className={`flex ${m.uid === user.username ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}
                       >
-                        {selectedPeer.username === 'global' && m.uid !== user.username && <div style={{fontSize: 11, fontWeight: 700, marginBottom: 2, color: '#FF9500'}}>{m.name}</div>}
+                        <div className={`max-w-[80%] px-3 py-1.5 rounded-[18px] shadow-sm relative ${
+                            m.type === 'image' ? 'p-1 bg-transparent shadow-none' :
+                                m.uid === user.username ? 'bg-[#e1ffc7] rounded-tr-[4px]' : 'bg-white rounded-tl-[4px]'
+                        }`}>
+                          {/* Имя отправителя в глобальном чате */}
+                          {selectedPeer.username === 'global' && m.uid !== user.username && m.type !== 'image' && (
+                              <div className="text-[12px] font-bold mb-0.5 text-[#007aff]">{m.name}</div>
+                          )}
 
-                        {m.type === 'video_circle' ? (
-                            <video src={m.text} controls className="circle-video" playsInline />
-                        ) : m.type === 'voice' ? (
-                            <audio src={m.text} controls style={{width: 190, height: 35}} />
-                        ) : <div style={{fontSize: 16}}>{m.text}</div>}
+                          {/* Рендер контента */}
+                          {m.type === 'video_circle' ? (
+                              <div className="w-56 h-56 rounded-full overflow-hidden border-[3px] border-[#e1ffc7] shadow-md bg-black relative">
+                                <video src={m.text} autoPlay loop muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+                              </div>
+                          ) : m.type === 'voice' ? (
+                              <div className="flex items-center space-x-3 py-1 pr-6 min-w-[160px]">
+                                <div className="bg-[#007aff] rounded-full p-2 text-white shadow-sm"><Mic size={18} fill="white" /></div>
+                                <div className="flex-1">
+                                  <audio src={m.text} controls className="hidden" id={`audio-${m.id}`} />
+                                  <div className="h-[3px] w-full bg-blue-200 rounded-full cursor-pointer" onClick={() => document.getElementById(`audio-${m.id}`).play()}>
+                                    <div className="h-full w-0 bg-[#007aff] rounded-full"></div>
+                                  </div>
+                                  <div className="text-[11px] text-[#007aff] mt-1 font-medium">Голосовое</div>
+                                </div>
+                              </div>
+                          ) : m.type === 'image' ? (
+                              <img src={m.text} alt="Вложение" className="max-w-[240px] max-h-[300px] rounded-2xl object-cover shadow-sm border border-gray-200" />
+                          ) : (
+                              <p className="text-[16px] leading-[1.3] pr-10 text-black whitespace-pre-wrap word-break">{m.text}</p>
+                          )}
 
-                        {activeReactionId === m.id && (
-                            <div className="reaction-picker" style={{left: m.uid === user.username ? 'auto' : 0, right: m.uid === user.username ? 0 : 'auto'}}>
-                              {['❤️', '👍', '🔥', '😂'].map(e => <span key={e} onClick={(ev) => { ev.stopPropagation(); addReaction(m.id, e); }} style={{fontSize: 22, cursor: 'pointer'}}>{e}</span>)}
-                            </div>
-                        )}
-
-                        {m.reactions && Object.keys(m.reactions).length > 0 && (
-                            <div className="reaction-badge">
-                              {Array.from(new Set(Object.values(m.reactions))).map((emoji, i) => <span key={i}>{emoji}</span>)}
-                              <span style={{marginLeft: 2, fontSize: 10, opacity: 0.7}}>{Object.keys(m.reactions).length}</span>
-                            </div>
-                        )}
-                        <div style={{fontSize: 10, opacity: 0.5, textAlign: 'right', marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3}}>
-                          {new Date(m.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-                          {m.uid === user.username && (m.read ? <CheckCheck size={12} color="#34C759"/> : <Check size={12} />)}
+                          {/* Время и статус */}
+                          <div className={`absolute bottom-1 right-2 flex items-center space-x-1 ${m.type === 'image' ? 'bg-black/40 text-white px-1.5 rounded-full bottom-2 right-2 backdrop-blur-sm' : ''}`}>
+                      <span className={`text-[10px] ${m.type === 'image' ? 'text-white' : 'text-green-800/60'}`}>
+                        {new Date(m.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                      </span>
+                            {m.uid === user.username && (
+                                m.read ? <CheckCheck size={12} className={m.type === 'image' ? 'text-white' : 'text-[#34C759]'} /> : <Check size={12} className={m.type === 'image' ? 'text-white' : 'text-[#34C759]'} />
+                            )}
+                          </div>
                         </div>
                       </div>
                   ))}
                 </div>
 
-                <div style={{padding: '10px 16px 35px', background: 'var(--nav-bg)', backdropFilter: 'blur(25px)', display: 'flex', gap: 10, alignItems: 'center', borderTop: '0.5px solid var(--sep)'}}>
-                  {isRecording === 'voice' ? (
-                      <div style={{flex: 1, display: 'flex', alignItems: 'center', background: '#FF3B30', padding: '10px 16px', borderRadius: 24, color: 'white'}}>
-                        <Mic size={18} style={{marginRight: 10}} />
-                        <span style={{flex: 1, fontWeight: 600}}>Запись голоса... {recTime}с</span>
-                        <button onClick={stopMediaRecording} style={{background: 'white', border: 'none', color: '#FF3B30', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center'}}><Square size={14} fill="currentColor"/></button>
+                {/* ОВЕРЛЕЙ ЗАПИСИ (HUD) */}
+                {isRecording && (
+                    <div className="absolute inset-x-0 bottom-24 z-[150] flex flex-col items-center animate-in fade-in slide-in-from-bottom-4">
+                      <div className="bg-white/90 backdrop-blur-xl rounded-full pl-2 pr-6 py-2 shadow-2xl border border-gray-200 flex items-center space-x-4">
+                        {isRecording === 'video' ? (
+                            <div className="w-24 h-24 bg-black rounded-full overflow-hidden border-4 border-[#007aff] shadow-inner shrink-0">
+                              <video ref={videoPreviewRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+                            </div>
+                        ) : (
+                            <div className="w-14 h-14 bg-[#007aff] rounded-full flex items-center justify-center shrink-0">
+                              <Mic size={28} className="text-white animate-pulse" fill="white" />
+                            </div>
+                        )}
+                        <div className="flex flex-col items-start min-w-[100px]">
+                          <div className="flex items-center space-x-2 text-red-500 font-bold text-lg">
+                            <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse" />
+                            <span className="font-mono">{formatTime(recTime)}</span>
+                          </div>
+                          <button onClick={cancelMediaRecording} className="text-[14px] text-gray-500 font-medium mt-1 hover:text-red-500 transition-colors">Отменить</button>
+                        </div>
                       </div>
+                    </div>
+                )}
+
+                {/* INPUT BAR */}
+                <div className="bg-[#f6f6f6] border-t border-gray-300 px-2 py-2 flex items-end space-x-2 pb-safe z-40 relative">
+                  <button className="p-2 text-[#8e8e93] active:text-[#007aff] transition-colors relative" onClick={() => fileInputRef.current?.click()}>
+                    <Paperclip size={26} />
+                    <input type="file" hidden ref={fileInputRef} accept="image/*" onChange={handleFileUpload} />
+                  </button>
+
+                  <div className="flex-1 bg-white border border-gray-300 rounded-[20px] min-h-[36px] px-3 py-1.5 flex items-center">
+                <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder="Сообщение"
+                    className="w-full focus:outline-none text-[17px] bg-transparent resize-none max-h-24 overflow-y-auto"
+                    rows={1}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage(input);
+                      }
+                    }}
+                />
+                  </div>
+
+                  {input.trim() ? (
+                      <button
+                          onClick={() => sendMessage(input)}
+                          className="p-1.5 bg-[#007aff] text-white rounded-full transition-transform active:scale-90 mb-0.5 shadow-sm"
+                      >
+                        <Send size={20} fill="white" className="ml-0.5" />
+                      </button>
                   ) : (
-                      <>
-                        <button onClick={() => startMediaRecording('video')} style={{background: 'none', border: 'none', color: '#8E8E93', cursor: 'pointer'}}><Camera size={28}/></button>
-                        <input
-                            style={{flex: 1, padding: '11px 16px', borderRadius: 22, border: 'none', background: isDark ? '#2C2C2E' : '#FFFFFF', color: 'var(--text-main)', fontSize: 16, outline: 'none'}}
-                            value={input} onChange={e => setInput(e.target.value)}
-                            placeholder="Сообщение"
-                            onKeyDown={e => e.key === 'Enter' && sendMessage(input)}
-                        />
-                        {input.trim() ? (
-                            <button onClick={() => sendMessage(input)} style={{background: 'var(--ios-blue)', borderRadius: '50%', width: 38, height: 38, border: 'none', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'}}><Send size={18}/></button>
-                        ) : <button onMouseDown={() => startMediaRecording('voice')} onTouchStart={() => startMediaRecording('voice')} style={{background: 'none', border: 'none', color: '#8E8E93', cursor: 'pointer'}}><Mic size={28}/></button>}
-                      </>
+                      <button
+                          onPointerDown={handlePointerDown}
+                          onPointerUp={handlePointerUp}
+                          className={`p-2 transition-all duration-200 mb-0.5 ${isRecording ? 'text-red-500 scale-125' : 'text-[#8e8e93]'}`}
+                      >
+                        {mode === 'voice' ? <Mic size={26} /> : <Camera size={26} />}
+                      </button>
                   )}
                 </div>
+
+                {/* Меню действий с сообщением (Контекстное меню) */}
+                {contextMenu && (
+                    <>
+                      <div className="fixed inset-0 z-[290] bg-black/10" onClick={() => setContextMenu(null)} />
+                      <div
+                          className="absolute z-[300] bg-white/95 backdrop-blur-2xl border border-gray-200 rounded-2xl shadow-2xl w-56 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+                          style={{ top: Math.min(contextMenu.y - 60, window.innerHeight - 150), left: Math.min(contextMenu.x - 50, window.innerWidth - 240) }}
+                      >
+                        <button onClick={() => deleteMessage('me')} className="w-full flex items-center px-4 py-3.5 text-[15px] text-gray-800 hover:bg-gray-100 border-b border-gray-100">
+                          <Trash size={18} className="mr-3 text-gray-400" /> Удалить у меня
+                        </button>
+                        <button onClick={() => deleteMessage('both')} className="w-full flex items-center px-4 py-3.5 text-[15px] text-red-600 hover:bg-red-50 font-medium">
+                          <Trash2 size={18} className="mr-3" /> Удалить у всех
+                        </button>
+                      </div>
+                    </>
+                )}
+
               </div>
           )}
 
+          {/* --- НИЖНЯЯ ПАНЕЛЬ НАВИГАЦИИ (TAB BAR) --- */}
           {view !== 'chat_room' && (
-              <div className="tab-bar">
-                <button className={`tab-item ${view === 'chats' ? 'active' : ''}`} onClick={() => setView('chats')}><MessageCircle size={28} /><span>Чаты</span></button>
-                <button className={`tab-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}><UserIcon size={28} /><span>Настройки</span></button>
+              <div className="h-[84px] bg-white/85 backdrop-blur-2xl border-t border-gray-200 flex justify-around pt-2 pb-safe shrink-0 z-30">
+                <button
+                    className={`flex flex-col items-center flex-1 ${view === 'chats' ? 'text-[#007aff]' : 'text-[#8e8e93]'}`}
+                    onClick={() => setView('chats')}
+                >
+                  <MessageCircle size={28} className={view === 'chats' ? 'fill-current' : ''} />
+                  <span className="text-[10px] font-medium mt-1">Чаты</span>
+                </button>
+                <button
+                    className={`flex flex-col items-center flex-1 ${view === 'settings' ? 'text-[#007aff]' : 'text-[#8e8e93]'}`}
+                    onClick={() => setView('settings')}
+                >
+                  <UserIcon size={28} className={view === 'settings' ? 'fill-current' : ''} />
+                  <span className="text-[10px] font-medium mt-1">Настройки</span>
+                </button>
               </div>
           )}
+
         </div>
       </div>
   );
