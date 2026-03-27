@@ -81,9 +81,9 @@ const auraStyles = (isDark) => `
 
   .btn-primary { 
     width: 100%; padding: 16px; background: var(--ios-blue); color: white; 
-    border: none; borderRadius: 14px; font-weight: 700; font-size: 17px; cursor: pointer;
+    border: none; border-radius: 14px; font-weight: 700; font-size: 17px; cursor: pointer;
   }
-  .btn-primary:disabled { opacity: 0.5; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .record-pulse { animation: pulse 1s infinite; background: #FF3B30 !important; }
   @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
@@ -106,6 +106,7 @@ export default function App() {
 
   const [formData, setFormData] = useState({ username: '', password: '', name: '', bio: '' });
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const scrollRef = useRef();
   const mediaRecorder = useRef(null);
@@ -114,22 +115,28 @@ export default function App() {
   // --- Инициализация Auth и Sync ---
   useEffect(() => {
     const init = async () => {
-      await signInAnonymously(auth);
-      const saved = localStorage.getItem('aura_user');
-      if (saved) setUser(JSON.parse(saved));
+      try {
+        await signInAnonymously(auth);
+        const saved = localStorage.getItem('aura_user');
+        if (saved) setUser(JSON.parse(saved));
+      } catch (e) {
+        console.error("Firebase Auth Error", e);
+      }
     };
     init();
 
-    const unsubUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (s) => {
-      setAllUsers(s.docs.map(d => d.data()));
-    });
+    if (db) {
+      const unsubUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (s) => {
+        setAllUsers(s.docs.map(d => d.data()));
+      });
 
-    const unsubMsgs = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (s) => {
-      const msgs = s.docs.map(d => d.data()).sort((a,b) => a.ts - b.ts);
-      setMessages(msgs);
-    });
+      const unsubMsgs = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (s) => {
+        const msgs = s.docs.map(d => d.data()).sort((a,b) => a.ts - b.ts);
+        setMessages(msgs);
+      });
 
-    return () => { unsubUsers(); unsubMsgs(); };
+      return () => { unsubUsers(); unsubMsgs(); };
+    }
   }, []);
 
   useEffect(() => {
@@ -139,26 +146,44 @@ export default function App() {
   // --- Обработчики ---
   const handleAuth = async () => {
     const { username, password, name } = formData;
-    if (!username || !password) return;
+    if (!username || !password) {
+      setErrorMsg("Заполните логин и пароль");
+      return;
+    }
     setLoading(true);
+    setErrorMsg('');
 
-    const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', username.toLowerCase());
-    const snap = await getDoc(userRef);
+    try {
+      const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', username.toLowerCase().trim());
+      const snap = await getDoc(userRef);
 
-    if (authStep === 'reg') {
-      if (snap.exists()) { setLoading(false); return alert("Логин занят"); }
-      const newUser = {
-        username: username.toLowerCase(),
-        password,
-        name: name || username,
-        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`,
-        bio: 'Использую Aura'
-      };
-      await setDoc(userRef, newUser);
-      completeLogin(newUser);
-    } else {
-      if (!snap.exists() || snap.data().password !== password) { setLoading(false); return alert("Ошибка входа"); }
-      completeLogin(snap.data());
+      if (authStep === 'reg') {
+        if (snap.exists()) {
+          setLoading(false);
+          setErrorMsg("Этот никнейм уже занят");
+          return;
+        }
+        const newUser = {
+          username: username.toLowerCase().trim(),
+          password,
+          name: name || username,
+          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`,
+          bio: 'Использую Aura'
+        };
+        await setDoc(userRef, newUser);
+        completeLogin(newUser);
+      } else {
+        if (!snap.exists() || snap.data().password !== password) {
+          setLoading(false);
+          setErrorMsg("Неверный логин или пароль");
+          return;
+        }
+        completeLogin(snap.data());
+      }
+    } catch (e) {
+      console.error(e);
+      setErrorMsg("Ошибка базы данных. Проверьте настройки Firebase.");
+      setLoading(false);
     }
   };
 
@@ -196,7 +221,7 @@ export default function App() {
   };
 
   const stopRecord = () => {
-    if (mediaRecorder.current) {
+    if (mediaRecorder.current && mediaRecorder.current.state !== "inactive") {
       mediaRecorder.current.stop();
       setIsRecording(false);
     }
@@ -211,14 +236,41 @@ export default function App() {
             <div style={{width: 70, height: 70, background: '#007AFF', borderRadius: 20, margin: '0 auto 20px', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
               <MessageCircle color="white" size={40} />
             </div>
-            <h2 style={{color: 'var(--text-main)', marginBottom: '20px'}}>{authStep === 'reg' ? 'Регистрация' : 'Вход в Aura'}</h2>
-            <input className="ios-input" placeholder="Логин" onChange={e => setFormData({...formData, username: e.target.value})} />
-            <input className="ios-input" type="password" placeholder="Пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
-            {authStep === 'reg' && <input className="ios-input" placeholder="Ваше имя" onChange={e => setFormData({...formData, name: e.target.value})} />}
-            <button className="btn-primary" onClick={handleAuth} disabled={loading}>{loading ? 'Загрузка...' : 'Продолжить'}</button>
+            <h2 style={{color: 'var(--text-main)', marginBottom: '10px'}}>{authStep === 'reg' ? 'Регистрация' : 'Вход в Aura'}</h2>
+
+            {errorMsg && <div style={{color: '#FF3B30', fontSize: '14px', marginBottom: '15px', background: 'rgba(255,59,48,0.1)', padding: '10px', borderRadius: '10px'}}>{errorMsg}</div>}
+
+            <input
+                className="ios-input"
+                placeholder="Логин"
+                autoCapitalize="none"
+                onChange={e => { setFormData({...formData, username: e.target.value}); setErrorMsg(''); }}
+            />
+            <input
+                className="ios-input"
+                type="password"
+                placeholder="Пароль"
+                onChange={e => { setFormData({...formData, password: e.target.value}); setErrorMsg(''); }}
+            />
+            {authStep === 'reg' && (
+                <input
+                    className="ios-input"
+                    placeholder="Ваше имя"
+                    onChange={e => setFormData({...formData, name: e.target.value})}
+                />
+            )}
+
             <button
-                onClick={() => setAuthStep(authStep === 'reg' ? 'login' : 'reg')}
-                style={{marginTop: '20px', color: '#007AFF', border: 'none', background: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: '600'}}
+                className="btn-primary"
+                onClick={handleAuth}
+                disabled={loading}
+            >
+              {loading ? 'Загрузка...' : 'Продолжить'}
+            </button>
+
+            <button
+                onClick={() => { setAuthStep(authStep === 'reg' ? 'login' : 'reg'); setErrorMsg(''); }}
+                style={{marginTop: '20px', color: '#007AFF', border: 'none', background: 'none', cursor: 'pointer', fontSize: '15px', fontWeight: '600', width: '100%'}}
             >
               {authStep === 'reg' ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Создать'}
             </button>
