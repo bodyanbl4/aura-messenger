@@ -1,13 +1,34 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { io } from 'socket.io-client';
+import { initializeApp } from 'firebase/app';
+import {
+  getAuth,
+  signInAnonymously,
+  onAuthStateChanged,
+  signInWithCustomToken
+} from 'firebase/auth';
+import {
+  getFirestore,
+  doc,
+  setDoc,
+  getDoc,
+  collection,
+  onSnapshot,
+  addDoc,
+  query,
+  getDocs
+} from 'firebase/firestore';
 import {
   Search, MessageCircle, ChevronLeft, Send, Phone, User, Plus,
   Sticker, AlertCircle, Lock, User as UserIcon, LogOut, Video,
   Smile, Mic, Moon, Sun, Camera, Save, X, Play, Square
 } from 'lucide-react';
 
-// --- КОНФИГУРАЦИЯ СЕРВЕРА ---
-const SERVER_URL = 'https://aura-je6y.onrender.com';
+// --- КОНФИГУРАЦИЯ FIREBASE ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'aura-messenger-v1';
 
 const auraStyles = (isDark) => `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
@@ -86,79 +107,91 @@ const auraStyles = (isDark) => `
   .send-btn { background: var(--ios-blue); border: none; color: white; width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; }
   .record-active { background: #FF3B30 !important; animation: pulse 1s infinite; }
   @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+  .btn-primary { 
+    background: var(--ios-blue); color: white; border: none; width: 100%; 
+    height: 58px; border-radius: 20px; font-size: 18px; font-weight: 700; 
+    margin-top: 15px; cursor: pointer; transition: 0.3s;
+  }
 `;
 
 export default function App() {
-  const [user, setUser] = useState(null);
+  const [firebaseUser, setFirebaseUser] = useState(null);
+  const [appUser, setAppUser] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(localStorage.getItem('aura_dark') === 'true');
   const [isRegister, setIsRegister] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
 
+  const [allUsers, setAllUsers] = useState([]);
+  const [allMessages, setAllMessages] = useState([]);
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState(null);
   const [inputText, setInputText] = useState('');
-  const [socket, setSocket] = useState(null);
   const [error, setError] = useState('');
   const [showSettings, setShowSettings] = useState(false);
 
-  // Для голосовых
   const [isRecording, setIsRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const audioChunks = useRef([]);
-
   const messagesEndRef = useRef(null);
 
-  // --- ИНИЦИАЛИЗАЦИЯ ---
-  const initSession = (userData) => {
-    setUser(userData);
-    localStorage.setItem('aura_user', JSON.stringify(userData));
-
-    // Подключаем сокет
-    const s = io(SERVER_URL, { transports: ['websocket'] });
-    setSocket(s);
-
-    s.emit('user_online', userData.id);
-
-    // Первая загрузка чатов
-    syncChats(userData.id);
-  };
-
-  const syncChats = (userId) => {
-    fetch(`${SERVER_URL}/api/sync?userId=${userId}`)
-        .then(r => r.json())
-        .then(d => d.success && setChats(d.chats));
-  };
-
+  // --- 1. АУТЕНТИФИКАЦИЯ FIREBASE (ПРАВИЛО 3) ---
   useEffect(() => {
-    const saved = localStorage.getItem('aura_user');
-    if (saved) initSession(JSON.parse(saved));
+    const initAuth = async () => {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        await signInWithCustomToken(auth, __initial_auth_token);
+      } else {
+        await signInAnonymously(auth);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setFirebaseUser(u);
+      // Проверяем локальную сессию приложения
+      const saved = localStorage.getItem('aura_app_user');
+      if (saved) setAppUser(JSON.parse(saved));
+    });
+    return () => unsubscribe();
   }, []);
 
-  // --- REAL-TIME ЛОГИКА ---
+  // --- 2. СИНХРОНИЗАЦИЯ ДАННЫХ (ПРАВИЛО 2) ---
   useEffect(() => {
-    if (!socket) return;
+    if (!firebaseUser) return;
 
-    const handleNewMsg = (msg) => {
-      setChats(prev => prev.map(chat => {
-        if (chat.id === msg.senderId || chat.id === msg.receiverId) {
-          // Проверяем, нет ли уже такого сообщения (защита от дублей)
-          if (chat.messages.some(m => m.id === msg.id)) return chat;
-          return { ...chat, messages: [...chat.messages, msg] };
-        }
-        return chat;
-      }));
-    };
+    // Слушаем всех пользователей (публичные данные - ПРАВИЛО 1)
+    const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
+    const unsubUsers = onSnapshot(usersRef, (snapshot) => {
+      const usersData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      setAllUsers(usersData);
+    }, (err) => console.error("Ошибка загрузки пользователей:", err));
 
-    socket.on('new_msg', handleNewMsg);
-    socket.on('msg_delivered', handleNewMsg);
+    // Слушаем все сообщения
+    const msgsRef = collection(db, 'artifacts', appId, 'public', 'data', 'messages');
+    const unsubMsgs = onSnapshot(msgsRef, (snapshot) => {
+      const msgsData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      // Сортируем по времени в памяти
+      const sorted = msgsData.sort((a, b) => a.timestamp - b.timestamp);
+      setAllMessages(sorted);
+    }, (err) => console.error("Ошибка загрузки сообщений:", err));
 
-    return () => {
-      socket.off('new_msg');
-      socket.off('msg_delivered');
-    };
-  }, [socket]);
+    return () => { unsubUsers(); unsubMsgs(); };
+  }, [firebaseUser]);
+
+  // Сборка чатов в памяти
+  useEffect(() => {
+    if (!appUser) return;
+    const otherUsers = allUsers.filter(u => u.username !== appUser.username);
+    const compiledChats = otherUsers.map(u => {
+      const chatMsgs = allMessages.filter(m =>
+          (m.senderId === appUser.username && m.receiverId === u.username) ||
+          (m.senderId === u.username && m.receiverId === appUser.username)
+      );
+      return { ...u, messages: chatMsgs };
+    });
+    setChats(compiledChats);
+  }, [allUsers, allMessages, appUser]);
 
   // --- ФУНКЦИИ ---
   const toggleTheme = () => {
@@ -169,24 +202,64 @@ export default function App() {
 
   const handleAuth = async () => {
     if (!username || !password) return setError("Заполните поля");
+    if (!firebaseUser) return setError("Подключение к облаку...");
     setError("");
-    const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+
+    const userDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', username);
+
     try {
-      const res = await fetch(`${SERVER_URL}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(isRegister ? { username, password, name: displayName } : { username, password })
-      });
-      const data = await res.json();
-      if (data.success) initSession(data.user);
-      else setError(data.error);
-    } catch (e) { setError("Ошибка сервера"); }
+      const userSnap = await getDoc(userDocRef);
+
+      if (isRegister) {
+        if (userSnap.exists()) return setError("Этот логин уже занят");
+        const newUser = {
+          username,
+          password, // В реальных приложениях используйте хеширование!
+          name: displayName || username,
+          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}&backgroundColor=007AFF`,
+          bio: "Использую Aura Messenger"
+        };
+        await setDoc(userDocRef, newUser);
+        setAppUser(newUser);
+        localStorage.setItem('aura_app_user', JSON.stringify(newUser));
+      } else {
+        if (!userSnap.exists() || userSnap.data().password !== password) {
+          return setError("Неверный логин или пароль");
+        }
+        const userData = userSnap.data();
+        setAppUser(userData);
+        localStorage.setItem('aura_app_user', JSON.stringify(userData));
+      }
+    } catch (e) {
+      setError("Ошибка базы данных. Попробуйте снова.");
+    }
   };
 
-  const handleSendMessage = (text, type = 'text') => {
-    if (!activeChatId || !socket || (!text && type !== 'voice')) return;
-    socket.emit('send_msg', { senderId: user.id, receiverId: activeChatId, text, type });
-    setInputText('');
+  const handleSendMessage = async (text, type = 'text') => {
+    if (!activeChatId || !appUser || (!text && type !== 'voice')) return;
+
+    const msgsRef = collection(db, 'artifacts', appId, 'public', 'data', 'messages');
+    const newMsg = {
+      senderId: appUser.username,
+      receiverId: activeChatId,
+      text,
+      type,
+      timestamp: Date.now(),
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    try {
+      await addDoc(msgsRef, newMsg);
+      setInputText('');
+    } catch (e) {
+      console.error("Ошибка отправки:", e);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('aura_app_user');
+    setAppUser(null);
+    setActiveChatId(null);
   };
 
   // --- ГОЛОСОВЫЕ ---
@@ -218,104 +291,114 @@ export default function App() {
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chats, activeChatId]);
 
   // --- UI ---
-  if (!user) {
+  if (!appUser) {
     return (
         <div className="screen flex-center" style={{padding: '20px'}}>
           <style>{auraStyles(isDarkMode)}</style>
           <div className="glass-card animate-pop">
-            <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${isRegister ? username : 'Aura'}&backgroundColor=007AFF`} className="avatar-main" alt="Logo" />
+            <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${isRegister ? username || 'Aura' : 'Aura'}&backgroundColor=007AFF`} className="avatar-main" alt="Logo" />
             <h1 style={{margin: '0 0 5px', fontSize: '32px', fontWeight: '800'}}>Aura</h1>
             <p style={{color: 'var(--text-sec)', margin: '0 0 30px', fontWeight: '500'}}>
-              {isRegister ? 'Создать профиль Pro' : 'Вход в мессенджер'}
+              {isRegister ? 'Регистрация в облаке' : 'Вход в мессенджер'}
             </p>
-            {error && <div style={{color: '#FF3B30', background: 'rgba(255,59,48,0.1)', padding: '12px', borderRadius: '15px', marginBottom: '15px'}}>{error}</div>}
-            <div className="ios-input-group"><UserIcon size={20} color="#A0A0A5" /><input placeholder="Логин" value={username} onChange={e => setUsername(e.target.value.toLowerCase())} /></div>
+            {error && <div style={{color: '#FF3B30', background: 'rgba(255,59,48,0.1)', padding: '12px', borderRadius: '15px', marginBottom: '15px', fontSize: '14px'}}>{error}</div>}
+            <div className="ios-input-group"><UserIcon size={20} color="#A0A0A5" /><input placeholder="Логин" value={username} onChange={e => setUsername(e.target.value.toLowerCase().trim())} /></div>
             <div className="ios-input-group"><Lock size={20} color="#A0A0A5" /><input type="password" placeholder="Пароль" value={password} onChange={e => setPassword(e.target.value)} /></div>
-            {isRegister && <div className="ios-input-group"><Plus size={20} color="#A0A0A5" /><input placeholder="Имя" value={displayName} onChange={e => setDisplayName(e.target.value)} /></div>}
-            <button className="btn-primary" onClick={handleAuth}>{isRegister ? 'Зарегистрироваться' : 'Войти'}</button>
+            {isRegister && <div className="ios-input-group animate-pop"><Plus size={20} color="#A0A0A5" /><input placeholder="Ваше имя" value={displayName} onChange={e => setDisplayName(e.target.value)} /></div>}
+            <button className="btn-primary" onClick={handleAuth}>{isRegister ? 'Создать аккаунт' : 'Войти'}</button>
             <p style={{marginTop: '20px', fontSize: '14px', color: 'var(--text-sec)'}}>
               {isRegister ? 'Есть аккаунт?' : 'Впервые здесь?'}
-              <span onClick={() => setIsRegister(!isRegister)} style={{color: 'var(--ios-blue)', marginLeft: '8px', cursor: 'pointer', fontWeight: 'bold'}}>{isRegister ? 'Войти' : 'Создать'}</span>
+              <span onClick={() => { setIsRegister(!isRegister); setError(""); }} style={{color: 'var(--ios-blue)', marginLeft: '8px', cursor: 'pointer', fontWeight: 'bold'}}>{isRegister ? 'Войти' : 'Создать'}</span>
             </p>
           </div>
         </div>
     );
   }
 
-  const activeChat = chats.find(c => c.id === activeChatId);
+  const activeChat = chats.find(c => c.username === activeChatId);
 
   return (
       <div className="screen">
         <style>{auraStyles(isDarkMode)}</style>
 
-        {/* ЛИСТ ЧАТОВ */}
+        {/* СПИСОК ЧАТОВ */}
         <div className={`flex-col h-full ${activeChatId || showSettings ? 'hidden' : ''}`}>
           <div className="glass-nav">
-            <div className="flex-row" style={{justifyContent: 'space-between', marginBottom: '20px'}}>
+            <div className="flex-row" style={{justifyContent: 'space-between', marginBottom: '20px', display: 'flex', alignItems: 'center'}}>
               <h1 style={{margin: 0, fontSize: '34px', fontWeight: '800'}}>Чаты</h1>
-              <div className="flex-row" style={{gap: '15px'}}>
-                {isDarkMode ? <Sun size={24} onClick={toggleTheme} /> : <Moon size={24} onClick={toggleTheme} />}
-                <img src={user.avatar} className="avatar-small" onClick={() => setShowSettings(true)} />
+              <div style={{display: 'flex', alignItems: 'center', gap: '15px'}}>
+                {isDarkMode ? <Sun size={24} onClick={toggleTheme} style={{cursor: 'pointer'}} /> : <Moon size={24} onClick={toggleTheme} style={{cursor: 'pointer'}} />}
+                <img src={appUser.avatar} className="avatar-small" onClick={() => setShowSettings(true)} />
               </div>
             </div>
-            <div className="ios-input-group" style={{marginBottom: 0}}><Search size={20} color="#A0A0A5" /><input placeholder="Поиск сообщений" /></div>
+            <div className="ios-input-group" style={{marginBottom: 0}}><Search size={20} color="#A0A0A5" /><input placeholder="Поиск" /></div>
           </div>
-          <div className="chat-list">
-            {chats.map(chat => (
-                <div key={chat.id} className="chat-item" onClick={() => setActiveChatId(chat.id)}>
-                  <img src={chat.avatar} className="avatar-list" />
-                  <div style={{flex: 1}}>
-                    <div className="flex-row" style={{justifyContent: 'space-between'}}>
-                      <b style={{fontSize: '17px'}}>{chat.name}</b>
-                      <span style={{fontSize: '12px', color: 'var(--text-sec)'}}>{chat.messages.slice(-1)[0]?.time || ''}</span>
-                    </div>
-                    <div style={{color: 'var(--text-sec)', fontSize: '14px', marginTop: '2px'}}>
-                      {chat.messages.slice(-1)[0]?.type === 'voice' ? '🎤 Голосовое' : chat.messages.slice(-1)[0]?.text || 'Напишите что-нибудь...'}
-                    </div>
-                  </div>
+          <div className="chat-list" style={{flex: 1, overflowY: 'auto'}}>
+            {chats.length === 0 ? (
+                <div style={{textAlign: 'center', marginTop: '100px', color: '#A0A0A5'}}>
+                  <MessageCircle size={60} style={{opacity: 0.2, marginBottom: '10px'}} />
+                  <p>Нет активных чатов.<br/>Зарегистрируйте другого пользователя!</p>
                 </div>
-            ))}
+            ) : (
+                chats.map(chat => (
+                    <div key={chat.username} className="chat-item" onClick={() => setActiveChatId(chat.username)}>
+                      <img src={chat.avatar} className="avatar-list" />
+                      <div style={{flex: 1, minWidth: 0}}>
+                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                          <b style={{fontSize: '17px'}}>{chat.name}</b>
+                          <span style={{fontSize: '12px', color: 'var(--text-sec)'}}>{chat.messages.slice(-1)[0]?.time || ''}</span>
+                        </div>
+                        <div style={{color: 'var(--text-sec)', fontSize: '14px', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                          {chat.messages.slice(-1)[0]?.type === 'voice' ? '🎤 Голосовое' : chat.messages.slice(-1)[0]?.text || 'Начните общение...'}
+                        </div>
+                      </div>
+                    </div>
+                ))
+            )}
           </div>
         </div>
 
-        {/* НАСТРОЙКИ / ПРОФИЛЬ */}
+        {/* НАСТРОЙКИ */}
         {showSettings && (
-            <div className="screen animate-pop">
-              <div className="glass-nav flex-row">
-                <button onClick={() => setShowSettings(false)} style={{background: 'none', border: 'none', color: 'var(--ios-blue)', fontSize: '18px', fontWeight: '600'}}><ChevronLeft size={30} /> Назад</button>
+            <div className="screen animate-pop" style={{position: 'fixed', top: 0, left: 0, zIndex: 300}}>
+              <div className="glass-nav flex-row" style={{display: 'flex', alignItems: 'center'}}>
+                <button onClick={() => setShowSettings(false)} style={{background: 'none', border: 'none', color: 'var(--ios-blue)', fontSize: '18px', fontWeight: '600', display: 'flex', alignItems: 'center', cursor: 'pointer'}}><ChevronLeft size={30} /> Назад</button>
                 <div style={{flex: 1, textAlign: 'center', fontWeight: '700'}}>Профиль</div>
-                <LogOut size={24} color="#FF3B30" onClick={() => { localStorage.clear(); window.location.reload(); }} />
+                <LogOut size={24} color="#FF3B30" onClick={handleLogout} style={{cursor: 'pointer'}} />
               </div>
               <div style={{padding: '30px', textAlign: 'center'}}>
                 <div style={{position: 'relative', display: 'inline-block'}}>
-                  <img src={user.avatar} className="avatar-main" style={{width: '120px', height: '120px'}} />
+                  <img src={appUser.avatar} className="avatar-main" style={{width: '120px', height: '120px'}} />
                   <div style={{position: 'absolute', bottom: 25, right: 0, background: 'var(--ios-blue)', color: 'white', padding: '8px', borderRadius: '50%'}}><Camera size={18} /></div>
                 </div>
-                <h2 style={{margin: '10px 0 5px'}}>{user.name}</h2>
-                <p style={{color: 'var(--text-sec)', marginBottom: '30px'}}>@{user.username}</p>
-
-                <div className="ios-input-group" style={{textAlign: 'left'}}><User size={20} color="#A0A0A5" /><input placeholder="О себе" defaultValue="Использую Aura Messenger" /></div>
-                <button className="btn-primary" style={{marginTop: '20px'}} onClick={() => setShowSettings(false)}><Save size={20} style={{marginRight: '10px'}} /> Сохранить изменения</button>
+                <h2 style={{margin: '10px 0 5px'}}>{appUser.name}</h2>
+                <p style={{color: 'var(--text-sec)', marginBottom: '30px'}}>@{appUser.username}</p>
+                <div className="ios-input-group" style={{textAlign: 'left'}}><User size={20} color="#A0A0A5" /><input placeholder="О себе" defaultValue={appUser.bio} /></div>
+                <button className="btn-primary" onClick={() => setShowSettings(false)}><Save size={20} style={{marginRight: '10px'}} /> Сохранить</button>
               </div>
             </div>
         )}
 
-        {/* ОКНО ЧАТА */}
+        {/* ЧАТ */}
         {activeChatId && activeChat && (
             <div className="screen" style={{position: 'fixed', top: 0, left: 0, zIndex: 200}}>
-              <div className="glass-nav flex-row">
-                <button onClick={() => setActiveChatId(null)} style={{background: 'none', border: 'none', color: 'var(--ios-blue)', display: 'flex', alignItems: 'center', fontSize: '18px', fontWeight: '600'}}><ChevronLeft size={30} /> Назад</button>
-                <div style={{flex: 1, textAlign: 'center', fontWeight: '700'}}>{activeChat.name}</div>
-                <div style={{width: '60px', display: 'flex', gap: '15px', color: 'var(--ios-blue)'}}><Video size={22} /><Phone size={22} /></div>
+              <div className="glass-nav flex-row" style={{display: 'flex', alignItems: 'center', paddingTop: '50px'}}>
+                <button onClick={() => setActiveChatId(null)} style={{background: 'none', border: 'none', color: 'var(--ios-blue)', display: 'flex', alignItems: 'center', fontSize: '18px', fontWeight: '600', cursor: 'pointer'}}>
+                  <ChevronLeft size={30} style={{marginLeft: '-10px'}} /> Назад
+                </button>
+                <div style={{flex: 1, textAlign: 'center', fontWeight: '700', fontSize: '17px'}}>{activeChat.name}</div>
+                <div style={{width: '60px', display: 'flex', gap: '15px', color: 'var(--ios-blue)', justifyContent: 'flex-end'}}>
+                  <Video size={22} /> <Phone size={22} />
+                </div>
               </div>
               <div className="msg-container">
                 {activeChat.messages.map((m, i) => (
-                    <div key={i} className={`bubble ${m.senderId === user.id ? 'bubble-me' : 'bubble-other'} animate-pop`}>
+                    <div key={i} className={`bubble ${m.senderId === appUser.username ? 'bubble-me' : 'bubble-other'} animate-pop`}>
                       {m.type === 'voice' ? (
-                          <div className="voice-bubble">
-                            <Play size={20} fill="currentColor" onClick={() => new Audio(m.text).play()} />
+                          <div className="voice-bubble" style={{display: 'flex', alignItems: 'center', gap: '10px', minWidth: '150px'}}>
+                            <Play size={20} fill="currentColor" onClick={() => new Audio(m.text).play()} style={{cursor: 'pointer'}} />
                             <div style={{height: '3px', flex: 1, background: 'rgba(255,255,255,0.3)', borderRadius: '2px'}}></div>
-                            <span style={{fontSize: '10px'}}>Голос</span>
+                            <span style={{fontSize: '10px'}}>Audio</span>
                           </div>
                       ) : m.text}
                       <div style={{fontSize: '10px', opacity: 0.5, textAlign: 'right', marginTop: '4px'}}>{m.time}</div>
@@ -328,12 +411,21 @@ export default function App() {
                     onMouseDown={startRecording} onMouseUp={stopRecording}
                     onTouchStart={startRecording} onTouchEnd={stopRecording}
                     className={`send-btn ${isRecording ? 'record-active' : ''}`}
-                    style={{background: isRecording ? '#FF3B30' : '#8E8E93'}}
+                    style={{background: isRecording ? '#FF3B30' : '#8E8E93', border: 'none', cursor: 'pointer'}}
                 >
-                  {isRecording ? <Square size={20} /> : <Mic size={24} />}
+                  {isRecording ? <Square size={20} color="white" /> : <Mic size={24} color="white" />}
                 </button>
-                <input className="msg-input" value={inputText} onChange={e => setInputText(e.target.value)} placeholder="Сообщение" />
-                <button className="send-btn" onClick={() => handleSendMessage(inputText)} disabled={!inputText.trim()}><Send size={20} /></button>
+                <input
+                    className="msg-input"
+                    value={inputText}
+                    onChange={e => setInputText(e.target.value)}
+                    placeholder="Сообщение"
+                    style={{flex: 1}}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSendMessage(inputText)}
+                />
+                <button className="send-btn" onClick={() => handleSendMessage(inputText)} disabled={!inputText.trim()} style={{border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+                  <Send size={20} color="white" />
+                </button>
               </div>
             </div>
         )}
