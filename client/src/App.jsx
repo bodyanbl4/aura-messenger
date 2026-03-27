@@ -61,7 +61,6 @@ const auraStyles = (isDark) => `
     position: relative; display: flex; flex-direction: column; overflow: hidden; 
   }
 
-  /* Анимации */
   .view-container { flex: 1; display: flex; flex-direction: column; height: 100%; animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
   @keyframes slideIn { from { transform: translateX(30px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
   @keyframes popIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
@@ -71,14 +70,11 @@ const auraStyles = (isDark) => `
     border: 1.5px solid var(--sep); background: ${isDark ? '#2C2C2E' : '#FFFFFF'}; 
     color: var(--text-main); font-size: 16px; outline: none; transition: all 0.2s;
   }
-  .ios-input:focus { border-color: var(--ios-blue); box-shadow: 0 0 0 3px rgba(0,122,255,0.1); }
 
   .btn-primary { 
     width: 100%; padding: 16px; background: var(--ios-blue); color: white; 
     border: none; border-radius: 16px; font-weight: 700; font-size: 17px; cursor: pointer;
-    transition: transform 0.1s; 
   }
-  .btn-primary:active { transform: scale(0.97); }
 
   .nav-bar { 
     padding: 55px 16px 15px; background: var(--nav-bg); backdrop-filter: blur(25px); 
@@ -90,12 +86,9 @@ const auraStyles = (isDark) => `
   .ios-item { 
     display: flex; align-items: center; padding: 12px 16px; cursor: pointer; 
     border: none; background: none; text-align: left; width: 100%; color: var(--text-main); position: relative;
-    transition: background 0.2s;
   }
-  .ios-item:active { background: ${isDark ? '#2C2C2E' : '#E5E5EA'}; }
   .ios-item:not(:last-child)::after { content: ''; position: absolute; left: 70px; right: 0; bottom: 0; height: 0.5px; background: var(--sep); }
 
-  /* Сообщения */
   .chat-scroll { 
     flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;
     background: ${isDark ? '#000' : '#F2F2F7'}; 
@@ -109,14 +102,19 @@ const auraStyles = (isDark) => `
   .bubble-me { background: var(--ios-blue); color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
   .bubble-other { background: ${isDark ? '#1C1C1E' : '#FFFFFF'}; color: var(--text-main); align-self: flex-start; border-bottom-left-radius: 4px; }
 
-  .circle-video { width: 200px; height: 200px; border-radius: 50%; object-fit: cover; border: 3px solid var(--ios-blue); box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+  .circle-video { width: 220px; height: 220px; border-radius: 50%; object-fit: cover; border: 3px solid var(--ios-blue); box-shadow: 0 4px 15px rgba(0,0,0,0.2); background: #000; }
   
-  .reaction-badge {
-    position: absolute; bottom: -8px; right: 10px; background: var(--card-bg); 
-    border-radius: 10px; padding: 1px 5px; font-size: 11px; border: 1px solid var(--sep);
-    display: flex; gap: 2px;
+  .recording-preview-overlay {
+    position: absolute; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    backdrop-filter: blur(10px);
   }
 
+  .recording-circle {
+    width: 280px; height: 280px; border-radius: 50%; border: 4px solid #FF3B30;
+    overflow: hidden; box-shadow: 0 0 40px rgba(255,59,48,0.4); background: #000;
+  }
+  
   .tab-bar { 
     height: 85px; background: var(--nav-bg); backdrop-filter: blur(25px); 
     border-top: 0.5px solid var(--sep); display: flex; justify-content: space-around; 
@@ -125,12 +123,28 @@ const auraStyles = (isDark) => `
   .tab-item { 
     display: flex; flex-direction: column; align-items: center; gap: 4px; 
     color: var(--text-sec); cursor: pointer; border: none; background: none; flex: 1;
-    transition: color 0.2s;
   }
   .tab-item.active { color: var(--ios-blue); }
 
   .avatar { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 0.5px solid var(--sep); }
   .avatar-huge { width: 110px; height: 110px; border-radius: 50%; object-fit: cover; margin: 0 auto 10px; border: 3px solid var(--ios-blue); display: block; background: #eee; }
+  
+  .reaction-picker {
+    position: absolute; background: var(--card-bg); border-radius: 24px; 
+    padding: 8px 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); display: flex; gap: 12px;
+    z-index: 200; top: -55px; animation: popIn 0.2s ease;
+  }
+  .reaction-badge {
+    position: absolute; bottom: -8px; right: 10px; background: var(--card-bg); 
+    border-radius: 12px; padding: 2px 6px; font-size: 11px; border: 1px solid var(--sep);
+    display: flex; gap: 3px; align-items: center;
+  }
+
+  .error-toast {
+    position: absolute; top: 100px; left: 20px; right: 20px; background: #FF3B30; color: white;
+    padding: 12px; border-radius: 12px; text-align: center; z-index: 2000; animation: slideInUp 0.3s ease;
+  }
+  @keyframes slideInUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 `;
 
 export default function App() {
@@ -146,14 +160,16 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [authStep, setAuthStep] = useState('login');
   const [activeReactionId, setActiveReactionId] = useState(null);
+  const [globalError, setGlobalError] = useState(null);
 
   const [isRecording, setIsRecording] = useState(null);
   const [recTime, setRecTime] = useState(0);
 
   const scrollRef = useRef();
   const mediaRecorder = useRef(null);
-  const videoRef = useRef(null);
+  const videoPreviewRef = useRef(null);
   const audioChunks = useRef([]);
+  const activeStream = useRef(null);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -178,6 +194,13 @@ export default function App() {
     onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (s) => {
       const users = s.docs.map(d => ({ id: d.id, ...d.data() }));
       setAllUsers(users);
+      if (user) {
+        const me = users.find(u => u.username === user.username);
+        if (me && JSON.stringify(me) !== JSON.stringify(user)) {
+          setUser(me);
+          localStorage.setItem('aura_user', JSON.stringify(me));
+        }
+      }
     });
     onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (s) => {
       setMessages(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.ts - b.ts));
@@ -218,9 +241,6 @@ export default function App() {
     try {
       const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.username);
       await updateDoc(userRef, updates);
-      const updatedUser = { ...user, ...updates };
-      setUser(updatedUser);
-      localStorage.setItem('aura_user', JSON.stringify(updatedUser));
     } catch (e) { console.error("Update fail:", e); }
   };
 
@@ -234,10 +254,20 @@ export default function App() {
 
   const sendMessage = async (val, type = 'text') => {
     if (!val.trim() && type === 'text') return;
-    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
-      text: val, uid: user.username, to: selectedPeer.username, ts: Date.now(), name: user.name, type, reactions: {}
-    });
-    setInput('');
+    try {
+      if (val.length > 950000) {
+        setGlobalError("Сообщение слишком большое.");
+        setTimeout(() => setGlobalError(null), 3000);
+        return;
+      }
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
+        text: val, uid: user.username, to: selectedPeer.username, ts: Date.now(), name: user.name, type, reactions: {}
+      });
+      setInput('');
+    } catch (e) {
+      setGlobalError("Ошибка отправки.");
+      setTimeout(() => setGlobalError(null), 3000);
+    }
   };
 
   const addReaction = async (msgId, emoji) => {
@@ -251,28 +281,49 @@ export default function App() {
 
   const startMediaRecording = async (type) => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const constraints = {
         audio: true,
-        video: type === 'video' ? { width: 400, height: 400, facingMode: 'user' } : false
-      });
-      if (type === 'video' && videoRef.current) videoRef.current.srcObject = stream;
+        video: type === 'video' ? {
+          width: { ideal: 400 },
+          height: { ideal: 400 },
+          facingMode: 'user'
+        } : false
+      };
 
-      mediaRecorder.current = new MediaRecorder(stream);
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      activeStream.current = stream;
+
+      if (type === 'video' && videoPreviewRef.current) {
+        videoPreviewRef.current.srcObject = stream;
+      }
+
+      const options = { mimeType: type === 'video' ? 'video/webm;codecs=vp8' : 'audio/webm' };
+      mediaRecorder.current = new MediaRecorder(stream, options);
       audioChunks.current = [];
-      mediaRecorder.current.ondataavailable = e => audioChunks.current.push(e.data);
+
+      mediaRecorder.current.ondataavailable = e => {
+        if (e.data.size > 0) audioChunks.current.push(e.data);
+      };
+
       mediaRecorder.current.onstop = () => {
         const blob = new Blob(audioChunks.current, { type: type === 'video' ? 'video/webm' : 'audio/webm' });
         const reader = new FileReader();
-        reader.onloadend = () => sendMessage(reader.result, type === 'video' ? 'video_circle' : 'voice');
+        reader.onloadend = () => {
+          sendMessage(reader.result, type === 'video' ? 'video_circle' : 'voice');
+          stream.getTracks().forEach(t => t.stop());
+          activeStream.current = null;
+        };
         reader.readAsDataURL(blob);
-        stream.getTracks().forEach(t => t.stop());
       };
+
       mediaRecorder.current.start();
       setIsRecording(type);
       setRecTime(0);
       const t = setInterval(() => setRecTime(p => p + 1), 1000);
       mediaRecorder.current.timer = t;
-    } catch (e) { alert("Разрешите доступ к камере/микрофону"); }
+    } catch (e) {
+      alert("Нет доступа к камере");
+    }
   };
 
   const stopMediaRecording = () => {
@@ -294,14 +345,14 @@ export default function App() {
       <div className="app-container">
         <style>{auraStyles(isDark)}</style>
         <div className="auth-wrap">
-          <div className="auth-card">
+          <div className="auth-card" style={{animation: 'popIn 0.5s ease'}}>
             <div style={{width: 70, height: 70, background: 'var(--ios-blue)', borderRadius: 20, margin: '0 auto 25px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 20px rgba(0,122,255,0.2)'}}><MessageCircle color="white" size={36} /></div>
             <h2 style={{textAlign: 'center', marginBottom: 25}}>{authStep === 'reg' ? 'Регистрация' : 'Вход в Aura'}</h2>
             <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
               <input className="ios-input" placeholder="Логин" onChange={e => setFormData({...formData, username: e.target.value})} />
               <input className="ios-input" type="password" placeholder="Пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
               {authStep === 'reg' && <input className="ios-input" placeholder="Ваше имя" onChange={e => setFormData({...formData, name: e.target.value})} />}
-              <button className="btn-primary" style={{marginTop: 10}} onClick={handleAuth} disabled={loading}>{loading ? 'Загрузка...' : 'Продолжить'}</button>
+              <button className="btn-primary" style={{marginTop: 10}} onClick={handleAuth} disabled={loading}>{loading ? '...' : 'Продолжить'}</button>
               <button style={{background: 'none', border: 'none', color: 'var(--ios-blue)', marginTop: 15, cursor: 'pointer', fontWeight: 600}} onClick={() => setAuthStep(authStep === 'reg' ? 'login' : 'reg')}>
                 {authStep === 'reg' ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Создать'}
               </button>
@@ -315,6 +366,20 @@ export default function App() {
       <div className="app-container">
         <style>{auraStyles(isDark)}</style>
         <div className="phone-screen">
+
+          {globalError && <div className="error-toast">{globalError}</div>}
+
+          {isRecording === 'video' && (
+              <div className="recording-preview-overlay">
+                <div className="recording-circle">
+                  <video ref={videoPreviewRef} autoPlay muted playsInline style={{width: '100%', height: '100%', objectFit: 'cover'}} />
+                </div>
+                <div style={{marginTop: 25, color: 'white', fontSize: 18, fontWeight: 700}}>Запись кружка... {recTime}с</div>
+                <button onClick={stopMediaRecording} style={{marginTop: 30, background: '#FF3B30', color: 'white', border: 'none', padding: '16px 32px', borderRadius: 32, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 10}}>
+                  <Square size={20} fill="white" /> Стоп и отправить
+                </button>
+              </div>
+          )}
 
           {view === 'chats' && (
               <div className="view-container">
@@ -360,7 +425,7 @@ export default function App() {
                   </button>
                   <button className="ios-item" onClick={() => { localStorage.clear(); window.location.reload(); }} style={{color: '#FF3B30'}}>
                     <div style={{background: '#FF3B30', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 12, color: 'white'}}><LogOut size={18}/></div>
-                    Выйти из аккаунта
+                    Выйти
                   </button>
                 </div>
               </div>
@@ -383,20 +448,19 @@ export default function App() {
                       <div
                           key={m.id}
                           className={`chat-bubble ${m.uid === user.username ? 'bubble-me' : 'bubble-other'}`}
-                          onContextMenu={(e) => { e.preventDefault(); setActiveReactionId(m.id); }}
                           onClick={() => setActiveReactionId(m.id === activeReactionId ? null : m.id)}
                       >
                         {selectedPeer.username === 'global' && m.uid !== user.username && <div style={{fontSize: 11, fontWeight: 700, marginBottom: 2, color: '#FF9500'}}>{m.name}</div>}
 
                         {m.type === 'video_circle' ? (
-                            <video src={m.text} controls className="circle-video" />
+                            <video src={m.text} controls className="circle-video" playsInline />
                         ) : m.type === 'voice' ? (
-                            <audio src={m.text} controls style={{width: 200, height: 35, borderRadius: 20}} />
+                            <audio src={m.text} controls style={{width: 190, height: 35}} />
                         ) : <div style={{fontSize: 16}}>{m.text}</div>}
 
                         {activeReactionId === m.id && (
-                            <div className="reaction-picker" style={{position: 'absolute', top: -45, left: m.uid === user.username ? 'auto' : 0, right: m.uid === user.username ? 0 : 'auto', background: 'var(--card-bg)', borderRadius: 20, padding: '8px 12px', display: 'flex', gap: 10, boxShadow: '0 5px 15px rgba(0,0,0,0.3)', zIndex: 200}}>
-                              {['❤️', '👍', '🔥', '😂'].map(e => <span key={e} onClick={(ev) => { ev.stopPropagation(); addReaction(m.id, e); }} style={{fontSize: 20, cursor: 'pointer'}}>{e}</span>)}
+                            <div className="reaction-picker" style={{left: m.uid === user.username ? 'auto' : 0, right: m.uid === user.username ? 0 : 'auto'}}>
+                              {['❤️', '👍', '🔥', '😂'].map(e => <span key={e} onClick={(ev) => { ev.stopPropagation(); addReaction(m.id, e); }} style={{fontSize: 22, cursor: 'pointer'}}>{e}</span>)}
                             </div>
                         )}
 
@@ -415,15 +479,15 @@ export default function App() {
                 </div>
 
                 <div style={{padding: '10px 16px 35px', background: 'var(--nav-bg)', backdropFilter: 'blur(25px)', display: 'flex', gap: 10, alignItems: 'center', borderTop: '0.5px solid var(--sep)'}}>
-                  {isRecording ? (
-                      <div style={{flex: 1, display: 'flex', alignItems: 'center', background: '#FF3B30', padding: '10px 16px', borderRadius: 24, color: 'white', animation: 'popIn 0.2s ease'}}>
-                        {isRecording === 'video' && <video ref={videoRef} autoPlay muted className="circle-video" style={{width: 35, height: 35, marginRight: 10, border: 'none'}} />}
-                        <span style={{flex: 1, fontWeight: 600}}>Запись... {recTime}с</span>
+                  {isRecording === 'voice' ? (
+                      <div style={{flex: 1, display: 'flex', alignItems: 'center', background: '#FF3B30', padding: '10px 16px', borderRadius: 24, color: 'white'}}>
+                        <Mic size={18} style={{marginRight: 10}} />
+                        <span style={{flex: 1, fontWeight: 600}}>Запись голоса... {recTime}с</span>
                         <button onClick={stopMediaRecording} style={{background: 'white', border: 'none', color: '#FF3B30', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center'}}><Square size={14} fill="currentColor"/></button>
                       </div>
                   ) : (
                       <>
-                        <button onMouseDown={() => startMediaRecording('video')} onTouchStart={() => startMediaRecording('video')} style={{background: 'none', border: 'none', color: '#8E8E93', cursor: 'pointer'}}><Camera size={28}/></button>
+                        <button onClick={() => startMediaRecording('video')} style={{background: 'none', border: 'none', color: '#8E8E93', cursor: 'pointer'}}><Camera size={28}/></button>
                         <input
                             style={{flex: 1, padding: '11px 16px', borderRadius: 22, border: 'none', background: isDark ? '#2C2C2E' : '#FFFFFF', color: 'var(--text-main)', fontSize: 16, outline: 'none'}}
                             value={input} onChange={e => setInput(e.target.value)}
