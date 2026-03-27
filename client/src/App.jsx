@@ -89,7 +89,8 @@ const auraStyles = (isDark) => `
   .circle-video-wrap video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); pointer-events: none; }
   .unread-dot { position: absolute; bottom: 20px; right: 20px; width: 14px; height: 14px; background: white; border-radius: 50%; box-shadow: 0 0 10px rgba(0,0,0,0.5); border: 2px solid var(--ios-blue); }
   
-  .reaction-badge { position: absolute; bottom: -10px; right: -10px; background: var(--card-bg); border-radius: 12px; padding: 2px 6px; font-size: 14px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); border: 1px solid var(--sep); }
+  .reaction-badge { position: absolute; bottom: -10px; right: -10px; background: var(--card-bg); border-radius: 12px; padding: 2px 6px; font-size: 14px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); border: 1px solid var(--sep); cursor: pointer; transition: transform 0.1s; }
+  .reaction-badge:active { transform: scale(0.9); }
   
   .sticker-img-3d { 
     width: 120px; height: 120px; object-fit: contain; animation: popIn 0.4s; 
@@ -131,6 +132,7 @@ export default function App() {
   const [allUsers, setAllUsers] = useState([]);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState(''); // Стейт для поиска по нику
   const [formData, setFormData] = useState({ username: '', password: '', name: '' });
   const [loading, setLoading] = useState(false);
   const [authStep, setAuthStep] = useState('login');
@@ -160,7 +162,7 @@ export default function App() {
   const pressTimer = useRef(null);
   const callTimer = useRef(null);
   const isHolding = useRef(false);
-  let lastTap = 0;
+  const lastTapRef = useRef(0); // Используем ref для безопасного хранения времени клика
 
   useEffect(() => {
     const initAuth = async () => {
@@ -281,7 +283,6 @@ export default function App() {
     } catch (e) { console.error(e); }
   };
 
-  // Надежное сохранение Аватарки в Настройках
   const handleAvatarChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -316,15 +317,24 @@ export default function App() {
     } catch (e) { showError("Ошибка отправки."); }
   };
 
+  // Логика двойного тапа (Установка и Снятие реакции)
   const handleDoubleTap = (e, m) => {
     const now = Date.now();
-    if (now - lastTap < 300) {
+    if (now - lastTapRef.current < 300) {
       e.preventDefault();
       const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'messages', m.id);
-      const newReactions = { ...m.reactions, [user.username]: '❤️' };
-      updateDoc(msgRef, { reactions: newReactions });
+      const currentReactions = { ...(m.reactions || {}) };
+
+      // Если реакция от нас уже есть - удаляем, если нет - ставим
+      if (currentReactions[user.username]) {
+        delete currentReactions[user.username];
+      } else {
+        currentReactions[user.username] = '❤️';
+      }
+
+      updateDoc(msgRef, { reactions: currentReactions });
     }
-    lastTap = now;
+    lastTapRef.current = now;
   };
 
   const openContextMenu = (e, item, type) => {
@@ -466,8 +476,15 @@ export default function App() {
     return 'Вложение';
   };
 
-  // Умная сортировка чатов: Закрепленные -> С новыми сообщениями -> Остальные
-  const sortedUsers = allUsers.filter(u => u.username !== user.username).sort((a, b) => {
+  // Фильтрация пользователей по поиску
+  const filteredUsers = allUsers.filter(u => u.username !== user.username).filter(u => {
+    if (!searchQuery) return true;
+    const lowerQ = searchQuery.toLowerCase();
+    return u.name.toLowerCase().includes(lowerQ) || u.username.toLowerCase().includes(lowerQ);
+  });
+
+  // Умная сортировка отфильтрованных чатов
+  const sortedUsers = filteredUsers.sort((a, b) => {
     const aPin = user.pinnedChats?.includes(a.username);
     const bPin = user.pinnedChats?.includes(b.username);
     if (aPin && !bPin) return -1;
@@ -501,7 +518,7 @@ export default function App() {
     return (
         <div className={`chat-bubble ${isMine ? 'bubble-me' : 'bubble-other'}`} style={contentStyle}
              onContextMenu={!isClone ? (e) => openContextMenu(e, m, 'message') : undefined}
-             onTouchStart={!isClone ? (e) => { handleDoubleTap(e, m); pressTimer.current = setTimeout(() => openContextMenu(e, m, 'message'), 500); } : undefined}
+             onTouchStart={!isClone ? (e) => { pressTimer.current = setTimeout(() => openContextMenu(e, m, 'message'), 500); } : undefined}
              onClick={!isClone ? (e) => handleDoubleTap(e, m) : undefined}
              onTouchEnd={!isClone ? () => clearTimeout(pressTimer.current) : undefined}
              onTouchMove={!isClone ? () => clearTimeout(pressTimer.current) : undefined}
@@ -615,8 +632,14 @@ export default function App() {
           {view === 'chats' && (
               <div className="view-container" style={{paddingTop: forwardMsg ? 40 : 0}}>
                 <div className="nav-bar glass-panel"><div style={{fontSize: 32, fontWeight: 800}}>Чаты</div><Edit3 size={24} color="var(--ios-blue)" /></div>
+                <div style={{padding: '10px 16px 12px'}}>
+                  <div style={{background: isDark ? '#1C1C1E' : '#E3E3E8', borderRadius: 10, padding: 10, display: 'flex', alignItems: 'center', gap: 8}}>
+                    <Search size={18} color="#8E8E93" />
+                    <input placeholder="Поиск по имени или @нику" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{background: 'none', border: 'none', outline: 'none', color: 'var(--text-main)', width: '100%', fontSize: 16}} />
+                  </div>
+                </div>
                 <div style={{flex: 1, overflowY: 'auto'}}>
-                  {(() => {
+                  {(!searchQuery || 'общий чат global'.includes(searchQuery.toLowerCase())) && (() => {
                     const lastGlobal = getLastMessage('global');
                     return (
                         <button className="ios-item" onClick={() => { setSelectedPeer({name: 'Общий чат', username: 'global'}); setView('chat_room'); if(forwardMsg){ sendMessage(forwardMsg.text, forwardMsg.type, forwardMsg.name); setForwardMsg(null); } }}>
