@@ -8,14 +8,15 @@ import {
   ChevronRight, Bell, Shield, Smartphone, Globe, MoreHorizontal, Edit3, Mic, Save, Square, Play
 } from 'lucide-react';
 
-// --- 🔑 ВСТАВЬТЕ ВАШИ ДАННЫЕ ИЗ FIREBASE CONSOLE ТУТ ---
+// --- 🔑 КОНФИГУРАЦИЯ FIREBASE ---
 const firebaseConfig = {
-  apiKey: "ВАШ_API_KEY",
-  authDomain: "ВАШ_PROJECT.firebaseapp.com",
-  projectId: "ВАШ_PROJECT_ID",
-  storageBucket: "ВАШ_PROJECT.appspot.com",
-  messagingSenderId: "ВАШ_SENDER_ID",
-  appId: "ВАШ_APP_ID"
+  apiKey: "AIzaSyBI5cMQ-zwjU1s4je2zzqBPpepSfBy0mKg",
+  authDomain: "aura-748c8.firebaseapp.com",
+  projectId: "aura-748c8",
+  storageBucket: "aura-748c8.firebasestorage.app",
+  messagingSenderId: "654947850743",
+  appId: "1:654947850743:web:91991c4c3d818ed20f36f2",
+  measurementId: "G-9X9QMW22Z1"
 };
 
 // Глобальные переменные окружения (если доступны)
