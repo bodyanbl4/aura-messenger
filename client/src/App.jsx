@@ -6,7 +6,7 @@ import {
   Search, MessageCircle, ChevronLeft, Send, User as UserIcon, LogOut, Moon,
   Camera, ChevronRight, Globe, Edit3, Mic, Check, CheckCheck, Paperclip,
   Trash, Trash2, Pin, Smile, Forward, Phone, Video, X, PhoneMissed, PhoneIncoming,
-  RefreshCw, Lock
+  RefreshCw, Lock, Pause, Play
 } from 'lucide-react';
 
 // --- 🔑 КОНФИГУРАЦИЯ FIREBASE ---
@@ -59,7 +59,7 @@ const auraStyles = (isDark) => `
   }
   
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
-  /* ЖЕСТКАЯ ФИКСАЦИЯ ОКНА (защита от "гуляющего" экрана iOS/Android) */
+  /* ЖЕСТКАЯ ФИКСАЦИЯ ОКНА */
   body { 
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
     background: #000; color: var(--text-main); 
@@ -117,9 +117,9 @@ const auraStyles = (isDark) => `
   
   .error-toast { position: absolute; top: 100px; left: 20px; right: 20px; background: rgba(255, 59, 48, 0.9); backdrop-filter: blur(10px); color: white; padding: 12px; border-radius: 12px; text-align: center; z-index: 3000; animation: slideInUp 0.3s ease; font-weight: bold; }
   @keyframes slideInUp { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-  .blur-overlay { position: fixed; inset: 0; background: ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.2)'}; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); z-index: 2000; animation: fadeIn 0.2s ease; cursor: pointer; }
+  .blur-overlay { position: fixed; inset: 0; background: ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.2)'}; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); z-index: 2000; animation: fadeIn 0.2s ease; display: flex; justify-content: center; align-items: center; }
   @keyframes fadeIn { from { opacity: 0; backdrop-filter: blur(0px); } to { opacity: 1; backdrop-filter: blur(12px); } }
-  .context-menu-popup { position: absolute; background: var(--card-bg); border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); width: 220px; z-index: 2005; overflow: hidden; border: 1px solid var(--sep); }
+  .context-menu-popup { background: var(--card-bg); border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); overflow: hidden; border: 1px solid var(--sep); }
   .context-menu-btn { width: 100%; padding: 14px 16px; background: none; border: none; border-bottom: 0.5px solid var(--sep); color: var(--text-main); font-size: 16px; text-align: left; display: flex; align-items: center; gap: 12px; cursor: pointer; }
   .context-menu-btn:active { background: ${isDark ? '#2C2C2E' : '#F2F2F7'}; }
   .context-menu-btn.danger { color: #FF3B30; }
@@ -152,6 +152,7 @@ export default function App() {
   const [recTime, setRecTime] = useState(0);
   const [cameraFacing, setCameraFacing] = useState('user');
   const [isLocked, setIsLocked] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
 
   const [contextMenu, setContextMenu] = useState(null);
   const [showStickers, setShowStickers] = useState(false);
@@ -179,55 +180,71 @@ export default function App() {
   const callTimer = useRef(null);
   const isHolding = useRef(false);
   const startY = useRef(0);
+  const startX = useRef(0);
   const lastTapRef = useRef(0);
 
+  // ИНИЦИАЛИЗАЦИЯ
   useEffect(() => {
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
-        } else { await signInAnonymously(auth); }
-      } catch (e) { console.error(e); }
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (e) { console.error("Ошибка аутентификации:", e); }
     };
+    initAuth();
+
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setFirebaseUser(u);
       if (u) {
         const saved = localStorage.getItem('aura_user');
-        if (saved) { try { setUser(JSON.parse(saved)); } catch (e) { localStorage.removeItem('aura_user'); } }
-      } else { initAuth(); }
+        if (saved) {
+          try { setUser(JSON.parse(saved)); }
+          catch (e) { localStorage.removeItem('aura_user'); }
+        }
+      }
     });
     return () => unsubscribe();
   }, []);
 
+  // ПОДГРУЗКА ДАННЫХ
   useEffect(() => {
     if (!firebaseUser) return;
+
     const unsubU = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (s) => {
       const users = s.docs.map(d => ({ id: d.id, ...d.data() }));
       setAllUsers(users);
-      if (user) {
-        const me = users.find(u => u.username === user.username);
-        if (me && JSON.stringify(me) !== JSON.stringify(user)) {
-          setUser(me); localStorage.setItem('aura_user', JSON.stringify(me));
-        }
-      }
-    });
+    }, (err) => console.error("Ошибка загрузки пользователей:", err));
+
     const unsubM = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (s) => {
       setMessages(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.ts - b.ts));
-    });
+    }, (err) => console.error("Ошибка загрузки сообщений:", err));
+
     const unsubLogs = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_logs'), (s) => {
       setCallLogs(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.ts - a.ts));
-    });
-    return () => { unsubU(); unsubM(); unsubLogs(); };
-  }, [firebaseUser, user?.username]);
+    }, (err) => console.error("Ошибка загрузки истории вызовов:", err));
 
-  // Фикс превью кружков: привязываем камеру к экрану
+    return () => { unsubU(); unsubM(); unsubLogs(); };
+  }, [firebaseUser]);
+
+  useEffect(() => {
+    if (user && allUsers.length > 0) {
+      const me = allUsers.find(u => u.username === user.username);
+      if (me && JSON.stringify(me) !== JSON.stringify(user)) {
+        setUser(me);
+        localStorage.setItem('aura_user', JSON.stringify(me));
+      }
+    }
+  }, [allUsers, user?.username]);
+
   useEffect(() => {
     if (isRecording === 'video' && videoPreviewRef.current && activeStream.current) {
       videoPreviewRef.current.srcObject = activeStream.current;
     }
   }, [isRecording, cameraFacing, activeStream.current]);
 
-  // Слушатель входящих звонков
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals'), where('callee', '==', user.username), where('status', '==', 'calling'));
@@ -235,17 +252,15 @@ export default function App() {
       snapshot.docChanges().forEach((change) => {
         const data = change.doc.data();
         if (change.type === 'added') {
-          const callerPeer = allUsers.find(u => u.username === data.caller) || { name: data.caller, username: data.caller };
-          setIncomingCall({ id: change.doc.id, ...data, peer: callerPeer });
+          setIncomingCall({ id: change.doc.id, ...data });
         }
         if (change.type === 'modified' && data.status !== 'calling') setIncomingCall(null);
         if (change.type === 'removed') setIncomingCall(null);
       });
-    });
+    }, (err) => console.error("Ошибка сигналов вызова:", err));
     return () => unsubCalls();
-  }, [user, allUsers]);
+  }, [user?.username]);
 
-  // Привязка стримов при звонке
   useEffect(() => {
     if (activeCall?.status === 'connected') {
       if (activeCall.type === 'video') {
@@ -332,6 +347,20 @@ export default function App() {
     } catch (e) { showError("Ошибка отправки."); }
   };
 
+  const handleReaction = async (emoji) => {
+    if (!contextMenu || contextMenu.type !== 'message') return;
+    const msg = contextMenu.item;
+    const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'messages', msg.id);
+    const currentReactions = { ...(msg.reactions || {}) };
+    if (currentReactions[user.username] === emoji) {
+      delete currentReactions[user.username];
+    } else {
+      currentReactions[user.username] = emoji;
+    }
+    await updateDoc(msgRef, { reactions: currentReactions }).catch(console.error);
+    closeContextMenu();
+  };
+
   const handleDoubleTap = (e, m) => {
     const now = Date.now();
     if (now - lastTapRef.current < 300) {
@@ -416,13 +445,13 @@ export default function App() {
           callTimer.current = setInterval(() => setCallDuration(p => p + 1), 1000);
         }
         if (data.status === 'ended' || data.status === 'declined') endCallLocal();
-      });
+      }, (err) => console.error("Ошибка активного звонка:", err));
 
       onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'calleeCandidates'), (snapshot) => {
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added') pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
         });
-      });
+      }, (err) => console.error("Ошибка ICE (получатель):", err));
     } catch (e) { showError("Нет доступа к камере/микрофону для звонка"); }
   };
 
@@ -461,13 +490,13 @@ export default function App() {
 
       onSnapshot(callDocRef, (snapshot) => {
         if (snapshot.data()?.status === 'ended') endCallLocal();
-      });
+      }, (err) => console.error("Ошибка ответа на звонок:", err));
 
       onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'callerCandidates'), (snapshot) => {
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added') pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
         });
-      });
+      }, (err) => console.error("Ошибка ICE (звонящий):", err));
     } catch (e) { showError("Ошибка при ответе на звонок"); }
   };
 
@@ -529,7 +558,6 @@ export default function App() {
     return 'Вложение';
   };
 
-  // ИСПРАВЛЕНИЕ 3: Полностью починенный поиск (убраны пробелы, точные совпадения выводятся наверх)
   const filteredUsers = allUsers.filter(u => u.username !== user?.username).filter(u => {
     if (!searchQuery) return true;
     const lowerQ = searchQuery.toLowerCase().replace('@', '').trim();
@@ -537,16 +565,15 @@ export default function App() {
   });
 
   const sortedUsers = [...filteredUsers].sort((a, b) => {
-    // Приоритет в поиске для точных совпадений
     if (searchQuery) {
       const q = searchQuery.toLowerCase().replace('@', '').trim();
-      const aExact = a.username.toLowerCase() === q || a.name?.toLowerCase() === q;
-      const bExact = b.username.toLowerCase() === q || b.name?.toLowerCase() === q;
+      const aExact = a.username?.toLowerCase() === q || a.name?.toLowerCase() === q;
+      const bExact = b.username?.toLowerCase() === q || b.name?.toLowerCase() === q;
       if (aExact && !bExact) return -1;
       if (!aExact && bExact) return 1;
 
-      const aStarts = a.username.toLowerCase().startsWith(q) || a.name?.toLowerCase().startsWith(q);
-      const bStarts = b.username.toLowerCase().startsWith(q) || b.name?.toLowerCase().startsWith(q);
+      const aStarts = a.username?.toLowerCase().startsWith(q) || a.name?.toLowerCase().startsWith(q);
+      const bStarts = b.username?.toLowerCase().startsWith(q) || b.name?.toLowerCase().startsWith(q);
       if (aStarts && !bStarts) return -1;
       if (!aStarts && bStarts) return 1;
     }
@@ -581,14 +608,13 @@ export default function App() {
     closeContextMenu();
   };
 
-  // --- ЛОГИКА ЗАПИСИ ---
+  // --- ЛОГИКА ЗАПИСИ (ОБНОВЛЕННАЯ С ПАУЗОЙ И ОТМЕНОЙ СВАЙПОМ) ---
   const startMediaRecording = async (type) => {
     try {
       const constraints = { audio: true, video: type === 'video' ? { facingMode: cameraFacing, width: 400, height: 400 } : false };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       activeStream.current = stream;
 
-      // Сразу привязываем видео для превью
       if (type === 'video' && videoPreviewRef.current) {
         videoPreviewRef.current.srcObject = stream;
       }
@@ -611,7 +637,7 @@ export default function App() {
       };
 
       mediaRecorder.current.start();
-      setIsRecording(type); setRecTime(0);
+      setIsRecording(type); setRecTime(0); setIsPaused(false);
       mediaRecorder.current.timer = setInterval(() => setRecTime(p => p + 1), 1000);
     } catch (e) { showError("Нет доступа к камере или микрофону"); }
   };
@@ -623,6 +649,7 @@ export default function App() {
     }
     setIsRecording(null);
     setIsLocked(false);
+    setIsPaused(false);
   };
 
   const cancelMediaRecording = () => {
@@ -633,7 +660,22 @@ export default function App() {
     }
     setIsRecording(null);
     setIsLocked(false);
+    setIsPaused(false);
     isHolding.current = false;
+  };
+
+  const togglePause = () => {
+    if (mediaRecorder.current) {
+      if (mediaRecorder.current.state === 'recording') {
+        mediaRecorder.current.pause();
+        setIsPaused(true);
+        clearInterval(mediaRecorder.current.timer);
+      } else if (mediaRecorder.current.state === 'paused') {
+        mediaRecorder.current.resume();
+        setIsPaused(false);
+        mediaRecorder.current.timer = setInterval(() => setRecTime(p => p + 1), 1000);
+      }
+    }
   };
 
   const flipCamera = async (e) => {
@@ -666,6 +708,7 @@ export default function App() {
     isHolding.current = false;
     setIsLocked(false);
     startY.current = e.clientY;
+    startX.current = e.clientX;
     pressTimer.current = setTimeout(() => {
       isHolding.current = true;
       startMediaRecording(mode);
@@ -674,8 +717,10 @@ export default function App() {
 
   const handlePointerMove = (e) => {
     if (isHolding.current && !isLocked) {
-      if (startY.current - e.clientY > 40) {
-        setIsLocked(true);
+      if (startY.current - e.clientY > 50) {
+        setIsLocked(true); // Заблокировать (свайп вверх)
+      } else if (startX.current - e.clientX > 60) {
+        cancelMediaRecording(); // Отменить (свайп влево)
       }
     }
   };
@@ -796,26 +841,29 @@ export default function App() {
               </div>
           )}
 
-          {incomingCall && !activeCall && (
-              <div style={{position: 'absolute', inset: 0, zIndex: 10000, background: isDark ? 'rgba(28,28,30,0.95)' : 'rgba(255,255,255,0.95)', backdropFilter: 'blur(40px)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 80, paddingBottom: 60, animation: 'fadeIn 0.3s ease'}}>
-                <div style={{color: 'var(--text-main)', fontSize: 32, fontWeight: 'bold'}}>{incomingCall.peer?.name || incomingCall.caller}</div>
-                <div style={{color: 'var(--text-sec)', fontSize: 18, marginTop: 8}}>{incomingCall.type === 'video' ? 'Входящий видеозвонок...' : 'Входящий аудиозвонок...'}</div>
-                <div style={{flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
-                  <div style={{position: 'relative', width: 160, height: 160}}>
-                    <div className="call-ring"></div>
-                    <img src={incomingCall.peer?.avatar || ''} style={{width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', position: 'relative', zIndex: 10, border: '4px solid var(--ios-blue)'}} alt="caller" />
+          {incomingCall && !activeCall && (() => {
+            const callerPeer = allUsers.find(u => u.username === incomingCall?.caller) || { name: incomingCall?.caller, avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${incomingCall?.caller}` };
+            return (
+                <div style={{position: 'absolute', inset: 0, zIndex: 10000, background: isDark ? 'rgba(28,28,30,0.95)' : 'rgba(255,255,255,0.95)', backdropFilter: 'blur(40px)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 80, paddingBottom: 60, animation: 'fadeIn 0.3s ease'}}>
+                  <div style={{color: 'var(--text-main)', fontSize: 32, fontWeight: 'bold'}}>{callerPeer.name}</div>
+                  <div style={{color: 'var(--text-sec)', fontSize: 18, marginTop: 8}}>{incomingCall.type === 'video' ? 'Входящий видеозвонок...' : 'Входящий аудиозвонок...'}</div>
+                  <div style={{flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+                    <div style={{position: 'relative', width: 160, height: 160}}>
+                      <div className="call-ring"></div>
+                      <img src={callerPeer.avatar} style={{width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', position: 'relative', zIndex: 10, border: '4px solid var(--ios-blue)'}} alt="caller" />
+                    </div>
+                  </div>
+                  <div style={{display: 'flex', gap: 60, marginBottom: 20}}>
+                    <button onClick={declineCall} style={{background: '#FF3B30', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(255,59,48,0.4)'}}>
+                      <Phone size={36} color="white" style={{transform: 'rotate(135deg)'}} />
+                    </button>
+                    <button onClick={answerCall} style={{background: '#34C759', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(52,199,89,0.4)', animation: 'popIn 0.5s infinite alternate'}}>
+                      <Phone size={36} color="white" />
+                    </button>
                   </div>
                 </div>
-                <div style={{display: 'flex', gap: 60, marginBottom: 20}}>
-                  <button onClick={declineCall} style={{background: '#FF3B30', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(255,59,48,0.4)'}}>
-                    <Phone size={36} color="white" style={{transform: 'rotate(135deg)'}} />
-                  </button>
-                  <button onClick={answerCall} style={{background: '#34C759', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(52,199,89,0.4)', animation: 'popIn 0.5s infinite alternate'}}>
-                    <Phone size={36} color="white" />
-                  </button>
-                </div>
-              </div>
-          )}
+            );
+          })()}
 
           {activeCall && (
               <div style={{position: 'absolute', inset: 0, zIndex: 9999, background: isDark ? 'rgba(28,28,30,0.85)' : 'rgba(255,255,255,0.85)', backdropFilter: 'blur(40px)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 60, paddingBottom: 40, animation: 'fadeIn 0.3s ease'}}>
@@ -1002,7 +1050,9 @@ export default function App() {
                       <div style={{
                         width: 280, height: 280, borderRadius: '50%', overflow: 'hidden',
                         border: '5px solid var(--ios-blue)', boxShadow: '0 20px 50px rgba(0,0,0,0.3)',
-                        position: 'relative'
+                        position: 'relative',
+                        transform: !isLocked ? 'scale(1.1)' : 'scale(1)',
+                        transition: 'transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
                       }}>
                         <video ref={videoPreviewRef} autoPlay muted playsInline
                                style={{width: '100%', height: '100%', objectFit: 'cover', transform: cameraFacing === 'user' ? 'scaleX(-1)' : 'scaleX(1)'}} />
@@ -1010,15 +1060,18 @@ export default function App() {
 
                       {/* Таймер */}
                       <div style={{marginTop: 30, display: 'flex', alignItems: 'center', gap: 10, color: '#FF3B30', fontWeight: 'bold', fontSize: 28, textShadow: '0 2px 10px rgba(0,0,0,0.2)'}}>
-                        <div style={{width: 14, height: 14, borderRadius: '50%', background: '#FF3B30', animation: 'pulseGlow 1s infinite'}} />
+                        {isPaused ? <span style={{color: 'white', opacity: 0.8, fontSize: 24}}>Пауза</span> : <div style={{width: 14, height: 14, borderRadius: '50%', background: '#FF3B30', animation: 'pulseGlow 1s infinite'}} />}
                         {formatTime(recTime)}
                       </div>
 
                       {/* Кнопки появляются только после фиксации свайпом вверх */}
                       {isLocked ? (
-                          <div style={{display: 'flex', alignItems: 'center', gap: 40, marginTop: 40}}>
+                          <div style={{display: 'flex', alignItems: 'center', gap: 40, marginTop: 40, animation: 'popIn 0.3s ease'}}>
                             <button onClick={cancelMediaRecording} style={{background: '#FF3B30', color: 'white', borderRadius: '50%', width: 60, height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 5px 15px rgba(255,59,48,0.4)'}}>
                               <Trash2 size={28} />
+                            </button>
+                            <button onClick={togglePause} style={{background: 'var(--card-bg)', color: 'var(--text-main)', border: '1px solid var(--sep)', borderRadius: '50%', width: 60, height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)'}}>
+                              {isPaused ? <Play size={28}/> : <Pause size={28}/>}
                             </button>
                             <button onClick={flipCamera} style={{background: 'var(--card-bg)', color: 'var(--text-main)', border: '1px solid var(--sep)', borderRadius: '50%', width: 60, height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)'}}>
                               <RefreshCw size={28} />
@@ -1028,34 +1081,47 @@ export default function App() {
                             </button>
                           </div>
                       ) : (
-                          <div style={{marginTop: 40, color: 'var(--text-main)', display: 'flex', flexDirection: 'column', alignItems: 'center', opacity: 0.7}}>
+                          <div style={{marginTop: 40, color: 'white', display: 'flex', flexDirection: 'column', alignItems: 'center', opacity: 0.8}}>
                             <Lock size={28} style={{marginBottom: 10}} />
                             <span style={{fontSize: 16, fontWeight: 500}}>Свайп вверх для фиксации</span>
+                            <span style={{fontSize: 14, fontWeight: 400, opacity: 0.6, marginTop: 5}}>Свайп влево для отмены</span>
                           </div>
                       )}
                     </div>
                 ) : isRecording === 'voice' ? (
                     // Обычный блок снизу для записи голоса
                     <div style={{position: 'absolute', bottom: 85, left: 0, right: 0, display: 'flex', justifyContent: 'center', zIndex: 150}}>
-                      <div className="glass-panel" style={{borderRadius: 40, padding: '8px 20px 8px 8px', display: 'flex', alignItems: 'center', gap: 15, boxShadow: '0 10px 25px rgba(0,0,0,0.2)', border: '1px solid var(--sep)'}}>
-                        <div style={{width: 50, height: 50, borderRadius: '50%', background: 'var(--ios-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center'}}><Mic size={24} color="white" /></div>
-                        <div style={{display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 100}}>
-                          <div style={{display: 'flex', alignItems: 'center', gap: 8, color: '#FF3B30', fontWeight: 'bold', fontSize: 18}}>
-                            <div style={{width: 10, height: 10, borderRadius: '50%', background: '#FF3B30', animation: 'pulseGlow 1s infinite'}} />{formatTime(recTime)}
-                          </div>
-                          {!isLocked ? (
-                              <div style={{fontSize: 11, color: 'var(--text-sec)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 3}}>
-                                <Lock size={10} /> Свайп вверх
+                      <div className="glass-panel" style={{borderRadius: 40, padding: isLocked ? '10px 20px' : '8px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '90%', maxWidth: 400, boxShadow: '0 10px 25px rgba(0,0,0,0.2)', border: '1px solid var(--sep)'}}>
+
+                        {isLocked ? (
+                            <>
+                              <button onClick={cancelMediaRecording} style={{background: 'none', border: 'none', cursor: 'pointer', padding: 8}}><Trash2 size={24} color="#FF3B30"/></button>
+                              <div style={{display: 'flex', alignItems: 'center', gap: 10, color: '#FF3B30', fontWeight: 'bold', fontSize: 18}}>
+                                {isPaused ? <span style={{color: 'var(--text-sec)', fontSize: 16}}>Пауза</span> : <div style={{width: 10, height: 10, borderRadius: '50%', background: '#FF3B30', animation: 'pulseGlow 1s infinite'}} />}
+                                {formatTime(recTime)}
                               </div>
-                          ) : (
-                              <button onClick={cancelMediaRecording} style={{background: 'none', border: 'none', color: 'var(--text-sec)', fontSize: 14, marginTop: 4, cursor: 'pointer', textAlign: 'left', outline: 'none'}}>Отменить</button>
-                          )}
-                        </div>
-                        {isLocked && (
-                            <button onClick={() => { stopMediaRecording(); setIsLocked(false); }} style={{background: 'var(--ios-blue)', color: 'white', borderRadius: '50%', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', marginLeft: 5}}>
-                              <Send size={20} />
-                            </button>
+                              <button onClick={togglePause} style={{background: 'none', border: 'none', cursor: 'pointer', padding: 8, color: 'var(--ios-blue)'}}>
+                                {isPaused ? <Play size={24} fill="var(--ios-blue)"/> : <Pause size={24} fill="var(--ios-blue)"/>}
+                              </button>
+                              <button onClick={() => { stopMediaRecording(); setIsLocked(false); }} style={{background: 'var(--ios-blue)', color: 'white', borderRadius: '50%', width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer'}}>
+                                <Send size={20} />
+                              </button>
+                            </>
+                        ) : (
+                            <>
+                              <div style={{display: 'flex', alignItems: 'center', gap: 15}}>
+                                <div style={{width: 10, height: 10, borderRadius: '50%', background: '#FF3B30', animation: 'pulseGlow 1s infinite'}} />
+                                <span style={{color: '#FF3B30', fontWeight: 'bold', fontSize: 18}}>{formatTime(recTime)}</span>
+                              </div>
+                              <div style={{color: 'var(--text-sec)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, animation: 'slideIn 0.3s'}}>
+                                <ChevronLeft size={16}/> Влево отмена
+                              </div>
+                              <div style={{width: 40, height: 40, borderRadius: '50%', background: 'var(--ios-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'popIn 0.3s'}}>
+                                <Mic size={20} color="white" />
+                              </div>
+                            </>
                         )}
+
                       </div>
                     </div>
                 ) : null}
@@ -1103,25 +1169,52 @@ export default function App() {
               </div>
           )}
 
+          {/* --- НОВОЕ КОНТЕКСТНОЕ МЕНЮ (КАК В ТГ) --- */}
           {contextMenu && (
               <div className="blur-overlay" onClick={closeContextMenu}>
-                {contextMenu.type === 'message' && (
-                    <div style={{ position: 'absolute', top: contextMenu.rect.top, left: contextMenu.rect.left, width: contextMenu.rect.width, zIndex: 2001, transform: 'scale(1.02)' }}>
-                      {renderMessageContent(contextMenu.item, true)}
+                {contextMenu.type === 'message' && (() => {
+                  const isMine = contextMenu.item.uid === user.username;
+                  return (
+                      <div style={{
+                        position: 'absolute',
+                        top: Math.max(50, contextMenu.rect.top - 60),
+                        [isMine ? 'right' : 'left']: isMine ? (window.innerWidth - contextMenu.rect.right) : contextMenu.rect.left,
+                        zIndex: 2001,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: isMine ? 'flex-end' : 'flex-start',
+                        maxWidth: '85vw'
+                      }} onClick={e => e.stopPropagation()}>
+
+                        {/* Панель с реакциями (Сверху) */}
+                        <div className="glass-panel" style={{display: 'flex', gap: 12, padding: '10px 16px', borderRadius: 30, marginBottom: 8, boxShadow: '0 10px 25px rgba(0,0,0,0.2)'}}>
+                          {['❤️', '👍', '👎', '😂', '😮', '😢'].map(e => (
+                              <span key={e} onClick={() => handleReaction(e)} style={{fontSize: 26, cursor: 'pointer', transition: 'transform 0.1s'}} onMouseDown={(e)=>e.target.style.transform='scale(1.2)'} onMouseUp={(e)=>e.target.style.transform='scale(1)'}>{e}</span>
+                          ))}
+                        </div>
+
+                        {/* Само сообщение (По центру) */}
+                        <div style={{transform: 'scale(1.02)', transformOrigin: isMine ? 'right center' : 'left center', transition: 'transform 0.2s', zIndex: 2}}>
+                          {renderMessageContent(contextMenu.item, true)}
+                        </div>
+
+                        {/* Меню действий (Снизу) */}
+                        <div className="context-menu-popup" style={{position: 'relative', marginTop: 12, left: 0, top: 0, right: 0, width: 250, zIndex: 2}}>
+                          <button className="context-menu-btn" onClick={togglePinMessage}><Pin size={18} /> {contextMenu.item.isPinned ? 'Открепить' : 'Закрепить'}</button>
+                          <button className="context-menu-btn" onClick={handleForwardStart}><Forward size={18} /> Переслать</button>
+                          <button className="context-menu-btn danger" onClick={() => deleteMessage('me')}><Trash size={18} /> Удалить у себя</button>
+                          {isMine && <button className="context-menu-btn danger" onClick={() => deleteMessage('both')} style={{borderBottom: 'none'}}><Trash2 size={18} /> Удалить у всех</button>}
+                        </div>
+
+                      </div>
+                  );
+                })()}
+
+                {contextMenu.type === 'chat' && (
+                    <div className="context-menu-popup" style={{ top: Math.min(contextMenu.rect.bottom - 20, window.innerHeight - 120), left: Math.max(20, contextMenu.rect.left + 50) }} onClick={e => e.stopPropagation()}>
+                      <button className="context-menu-btn" onClick={togglePinChat} style={{borderBottom: 'none'}}><Pin size={18} /> {user.pinnedChats?.includes(contextMenu.item.username) ? 'Открепить чат' : 'Закрепить чат'}</button>
                     </div>
                 )}
-                <div className="context-menu-popup" style={{ top: contextMenu.type === 'message' ? Math.min(contextMenu.rect.bottom + 15, window.innerHeight - 150) : Math.min(contextMenu.rect.bottom - 20, window.innerHeight - 120), left: contextMenu.type === 'message' ? (contextMenu.item.uid === user.username ? 'auto' : contextMenu.rect.left) : Math.max(20, contextMenu.rect.left + 50), right: contextMenu.type === 'message' && contextMenu.item.uid === user.username ? window.innerWidth - contextMenu.rect.right : 'auto' }} onClick={e => e.stopPropagation()}>
-                  {contextMenu.type === 'message' ? (
-                      <>
-                        <button className="context-menu-btn" onClick={togglePinMessage}><Pin size={18} /> {contextMenu.item.isPinned ? 'Открепить' : 'Закрепить'}</button>
-                        <button className="context-menu-btn" onClick={handleForwardStart}><Forward size={18} /> Переслать</button>
-                        <button className="context-menu-btn danger" onClick={() => deleteMessage('me')}><Trash size={18} /> Удалить у меня</button>
-                        {contextMenu.item.uid === user.username && <button className="context-menu-btn danger" onClick={() => deleteMessage('both')} style={{borderBottom: 'none'}}><Trash2 size={18} /> Удалить у всех</button>}
-                      </>
-                  ) : (
-                      <button className="context-menu-btn" onClick={togglePinChat} style={{borderBottom: 'none'}}><Pin size={18} /> {user.pinnedChats?.includes(contextMenu.item.username) ? 'Открепить чат' : 'Закрепить чат'}</button>
-                  )}
-                </div>
               </div>
           )}
 
