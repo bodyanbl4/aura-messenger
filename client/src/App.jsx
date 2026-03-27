@@ -36,6 +36,7 @@ const firebaseConfig = {
 const envConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : firebaseConfig;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'aura-pro-v26';
 
+// Инициализация сервисов Firebase
 const app = !getApps().length ? initializeApp(envConfig) : getApps()[0];
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -69,6 +70,7 @@ const auraStyles = (isDark) => `
   .btn-primary { 
     width: 100%; padding: 16px; background: var(--ios-blue); color: white; 
     border: none; border-radius: 16px; font-weight: 700; font-size: 17px; cursor: pointer; margin-top: 10px;
+    transition: opacity 0.2s;
   }
   .btn-primary:active { opacity: 0.8; }
   .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -136,7 +138,7 @@ export default function App() {
           try { setUser(JSON.parse(saved)); } catch (e) { localStorage.removeItem('aura_user'); }
         }
       } else {
-        initAuth(); // Если не авторизованы, инициируем вход
+        initAuth(); // Инициируем вход если нет сессии
       }
     });
 
@@ -147,7 +149,7 @@ export default function App() {
   useEffect(() => {
     if (!firebaseUser) return;
 
-    // Синхронизация пользователей
+    // Синхронизация пользователей (Используем путьartifacts/...)
     const usersQuery = collection(db, 'artifacts', appId, 'public', 'data', 'users');
     const unsubUsers = onSnapshot(usersQuery,
         (s) => {
@@ -156,7 +158,7 @@ export default function App() {
         (err) => {
           console.error("Users sync fail:", err);
           if (err.code === 'permission-denied') {
-            setErrorMsg("Доступ ограничен. Проверьте правила Firestore в консоли Firebase.");
+            setErrorMsg("База данных заблокирована. Проверьте вкладку 'Rules' в Firestore.");
           }
         }
     );
@@ -205,7 +207,7 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
-      setErrorMsg("Ошибка базы данных. Убедитесь, что правила Firestore позволяют чтение/запись.");
+      setErrorMsg("Ошибка записи в базу. Убедитесь, что правила Firestore позволяют запись.");
       setLoading(false);
     }
   };
@@ -223,7 +225,10 @@ export default function App() {
         text: val, uid: user.username, ts: Date.now(), name: user.name
       });
       setInput('');
-    } catch (e) { console.error("Send message fail:", e); }
+    } catch (e) {
+      console.error("Send message fail:", e);
+      setErrorMsg("Ошибка отправки. Проверьте правила доступа.");
+    }
   };
 
   if (!user) return (
@@ -236,12 +241,22 @@ export default function App() {
                 <MessageCircle color="white" size={44} />
               </div>
               <h2 style={{margin: '0 0 10px', fontSize: '24px'}}>Aura Messenger</h2>
+              <p style={{color: 'var(--text-sec)', marginBottom: '20px', fontSize: '15px'}}>{authStep === 'reg' ? 'Создание профиля' : 'Вход в аккаунт'}</p>
+
               {errorMsg && <div className="error-msg">{errorMsg}</div>}
+
               <input className="ios-input" placeholder="Логин" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} />
               <input className="ios-input" type="password" placeholder="Пароль" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
               {authStep === 'reg' && <input className="ios-input" placeholder="Ваше имя" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />}
-              <button className="btn-primary" onClick={handleAuth} disabled={loading || !firebaseUser}>{loading ? 'Загрузка...' : !firebaseUser ? 'Подключение...' : 'Продолжить'}</button>
-              <button onClick={() => { setAuthStep(authStep === 'reg' ? 'login' : 'reg'); setErrorMsg(''); }} style={{marginTop: '25px', color: '#007AFF', border: 'none', background: 'none', cursor: 'pointer', fontSize: '15px', fontWeight: '700'}}>
+
+              <button className="btn-primary" onClick={handleAuth} disabled={loading || !firebaseUser}>
+                {loading ? 'Загрузка...' : !firebaseUser ? 'Подключение...' : 'Продолжить'}
+              </button>
+
+              <button
+                  onClick={() => { setAuthStep(authStep === 'reg' ? 'login' : 'reg'); setErrorMsg(''); }}
+                  style={{marginTop: '25px', color: '#007AFF', border: 'none', background: 'none', cursor: 'pointer', fontSize: '15px', fontWeight: '700'}}
+              >
                 {authStep === 'reg' ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Создать'}
               </button>
             </div>
