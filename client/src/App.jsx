@@ -6,7 +6,7 @@ import {
   Search, MessageCircle, ChevronLeft, Send, User as UserIcon, LogOut, Moon,
   Camera, ChevronRight, Globe, Edit3, Mic, Check, CheckCheck, Paperclip,
   Trash, Trash2, Pin, Smile, Forward, Phone, Video, X, PhoneMissed, PhoneIncoming,
-  RefreshCw, Lock // Добавлены иконки для переворота камеры и замка
+  RefreshCw, Lock
 } from 'lucide-react';
 
 // --- 🔑 КОНФИГУРАЦИЯ FIREBASE ---
@@ -33,7 +33,7 @@ const rtcServers = {
   ]
 };
 
-// Анимированные стикеры (Стилизованы под 3D)
+// Анимированные стикеры
 const ANIMATED_STICKERS = [
   'https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.gif',
   'https://fonts.gstatic.com/s/e/notoemoji/latest/2764_fe0f/512.gif',
@@ -59,11 +59,18 @@ const auraStyles = (isDark) => `
   }
   
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #000; color: var(--text-main); overflow: hidden; }
+  /* ЖЕСТКАЯ ФИКСАЦИЯ ОКНА (защита от "гуляющего" экрана iOS/Android) */
+  body { 
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+    background: #000; color: var(--text-main); 
+    overflow: hidden; 
+    position: fixed; inset: 0; 
+    overscroll-behavior: none; touch-action: none; 
+  }
   
-  .app-container { width: 100vw; height: 100vh; display: flex; justify-content: center; background: #000; }
-  .phone-screen { width: 100%; max-width: 500px; height: 100%; background: var(--ios-bg); position: relative; display: flex; flex-direction: column; overflow: hidden; }
-  .view-container { flex: 1; display: flex; flex-direction: column; height: 100%; animation: slideIn 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); position: relative; overflow: hidden; }
+  .app-container { width: 100vw; height: 100vh; display: flex; justify-content: center; background: #000; overscroll-behavior: none; }
+  .phone-screen { width: 100%; max-width: 500px; height: 100%; background: var(--ios-bg); position: relative; display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none; }
+  .view-container { flex: 1; display: flex; flex-direction: column; height: 100%; animation: slideIn 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); position: relative; overflow: hidden; touch-action: pan-y; }
   
   @keyframes slideIn { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
   @keyframes popIn { 0% { transform: scale(0.95) translateY(10px); opacity: 0; } 100% { transform: scale(1) translateY(0); opacity: 1; } }
@@ -81,7 +88,7 @@ const auraStyles = (isDark) => `
   .ios-item:active { background: ${isDark ? '#2C2C2E' : '#E5E5EA'}; }
   .ios-item:not(:last-child)::after { content: ''; position: absolute; left: 70px; right: 0; bottom: 0; height: 0.5px; background: var(--sep); }
   
-  .chat-scroll { flex: 1; overflow-y: auto; padding: 12px 16px 100px; display: flex; flex-direction: column; gap: 8px; background: ${isDark ? '#000' : '#E6EBF0'}; background-image: ${isDark ? 'none' : "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')"}; background-attachment: fixed; }
+  .chat-scroll { flex: 1; overflow-y: auto; padding: 12px 16px 100px; display: flex; flex-direction: column; gap: 8px; background: ${isDark ? '#000' : '#E6EBF0'}; background-image: ${isDark ? 'none' : "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')"}; background-attachment: fixed; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
   
   .chat-bubble { max-width: 80%; width: fit-content; padding: 8px 12px; border-radius: 18px; font-size: 16px; position: relative; word-wrap: break-word; line-height: 1.3; animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-shadow: 0 1px 2px rgba(0,0,0,0.1); user-select: none; }
   .bubble-me { background: var(--bubble-me); color: var(--bubble-me-text); align-self: flex-end; border-bottom-right-radius: 4px; }
@@ -127,11 +134,11 @@ export default function App() {
   const [firebaseUser, setFirebaseUser] = useState(null);
   const [user, setUser] = useState(null);
   const [isDark, setIsDark] = useState(localStorage.getItem('aura_dark') === 'true');
-  const [view, setView] = useState('chats'); // 'chats', 'calls', 'settings', 'chat_room'
+  const [view, setView] = useState('chats');
   const [selectedPeer, setSelectedPeer] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
   const [messages, setMessages] = useState([]);
-  const [callLogs, setCallLogs] = useState([]); // История звонков
+  const [callLogs, setCallLogs] = useState([]);
   const [input, setInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [formData, setFormData] = useState({ username: '', password: '', name: '' });
@@ -143,16 +150,16 @@ export default function App() {
   const [mode, setMode] = useState('voice');
   const [isRecording, setIsRecording] = useState(null);
   const [recTime, setRecTime] = useState(0);
-  const [cameraFacing, setCameraFacing] = useState('user'); // Новое состояние для камеры
-  const [isLocked, setIsLocked] = useState(false); // Замок для записи
+  const [cameraFacing, setCameraFacing] = useState('user');
+  const [isLocked, setIsLocked] = useState(false);
 
   const [contextMenu, setContextMenu] = useState(null);
   const [showStickers, setShowStickers] = useState(false);
   const [forwardMsg, setForwardMsg] = useState(null);
 
-  // --- ЗВОНКИ (WebRTC состояния) ---
-  const [activeCall, setActiveCall] = useState(null); // Текущий исходящий/активный звонок
-  const [incomingCall, setIncomingCall] = useState(null); // Входящий вызов
+  // --- ЗВОНКИ ---
+  const [activeCall, setActiveCall] = useState(null);
+  const [incomingCall, setIncomingCall] = useState(null);
   const [callDuration, setCallDuration] = useState(0);
 
   const scrollRef = useRef();
@@ -161,14 +168,13 @@ export default function App() {
   const mediaRecorder = useRef(null);
   const videoPreviewRef = useRef(null);
   const audioChunks = useRef([]);
-  const activeStream = useRef(null); // Стрим для кружков и локальной камеры звонка
-  const remoteStream = useRef(null); // Стрим собеседника
-  const peerConnection = useRef(null); // WebRTC RTCPeerConnection
-  const callVideoRef = useRef(null); // Видео собеседника
-  const localVideoRef = useRef(null); // PIP видео (свое)
-  const remoteAudioRef = useRef(null); // Аудио собеседника
+  const activeStream = useRef(null);
+  const remoteStream = useRef(null);
+  const peerConnection = useRef(null);
+  const callVideoRef = useRef(null);
+  const localVideoRef = useRef(null);
+  const remoteAudioRef = useRef(null);
 
-  // Рефы для обработки касаний и удержания кнопки записи
   const pressTimer = useRef(null);
   const callTimer = useRef(null);
   const isHolding = useRef(false);
@@ -213,6 +219,13 @@ export default function App() {
     });
     return () => { unsubU(); unsubM(); unsubLogs(); };
   }, [firebaseUser, user?.username]);
+
+  // Фикс превью кружков: привязываем камеру к экрану
+  useEffect(() => {
+    if (isRecording === 'video' && videoPreviewRef.current && activeStream.current) {
+      videoPreviewRef.current.srcObject = activeStream.current;
+    }
+  }, [isRecording, cameraFacing, activeStream.current]);
 
   // Слушатель входящих звонков
   useEffect(() => {
@@ -358,7 +371,7 @@ export default function App() {
     closeContextMenu();
   };
 
-  // --- ЛОГИКА ЗВОНКОВ (WEBRTC + FIRESTORE SIGNALING) ---
+  // --- ЛОГИКА ЗВОНКОВ ---
   const startCall = async (type) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: type === 'video' ? { facingMode: 'user' } : false });
@@ -394,7 +407,6 @@ export default function App() {
 
       setActiveCall({ id: callId, type, peer: selectedPeer, status: 'calling', isCaller: true });
 
-      // Ждем ответа
       onSnapshot(callDocRef, (snapshot) => {
         const data = snapshot.data();
         if (!data) return;
@@ -406,7 +418,6 @@ export default function App() {
         if (data.status === 'ended' || data.status === 'declined') endCallLocal();
       });
 
-      // Слушаем ICE кандидатов собеседника
       onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'calleeCandidates'), (snapshot) => {
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added') pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
@@ -518,16 +529,29 @@ export default function App() {
     return 'Вложение';
   };
 
-  // ИСПРАВЛЕНИЕ: Безопасная фильтрация и предотвращение мутации массива
+  // ИСПРАВЛЕНИЕ 3: Полностью починенный поиск (убраны пробелы, точные совпадения выводятся наверх)
   const filteredUsers = allUsers.filter(u => u.username !== user?.username).filter(u => {
     if (!searchQuery) return true;
-    const lowerQ = searchQuery.toLowerCase().replace('@', '');
+    const lowerQ = searchQuery.toLowerCase().replace('@', '').trim();
     return (u.name || '').toLowerCase().includes(lowerQ) || (u.username || '').toLowerCase().includes(lowerQ);
   });
 
-  // Добавлен Spread operator [...filteredUsers], чтобы избежать поломки поиска из-за мутации
   const sortedUsers = [...filteredUsers].sort((a, b) => {
-    const aPin = user.pinnedChats?.includes(a.username); const bPin = user.pinnedChats?.includes(b.username);
+    // Приоритет в поиске для точных совпадений
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase().replace('@', '').trim();
+      const aExact = a.username.toLowerCase() === q || a.name?.toLowerCase() === q;
+      const bExact = b.username.toLowerCase() === q || b.name?.toLowerCase() === q;
+      if (aExact && !bExact) return -1;
+      if (!aExact && bExact) return 1;
+
+      const aStarts = a.username.toLowerCase().startsWith(q) || a.name?.toLowerCase().startsWith(q);
+      const bStarts = b.username.toLowerCase().startsWith(q) || b.name?.toLowerCase().startsWith(q);
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+    }
+
+    const aPin = user?.pinnedChats?.includes(a.username); const bPin = user?.pinnedChats?.includes(b.username);
     if (aPin && !bPin) return -1; if (!aPin && bPin) return 1;
     const timeA = getLastMessage(a.username)?.ts || 0; const timeB = getLastMessage(b.username)?.ts || 0;
     return timeB - timeA;
@@ -557,12 +581,18 @@ export default function App() {
     closeContextMenu();
   };
 
-  // --- ЛОГИКА ЗАПИСИ (Исправлено) ---
+  // --- ЛОГИКА ЗАПИСИ ---
   const startMediaRecording = async (type) => {
     try {
       const constraints = { audio: true, video: type === 'video' ? { facingMode: cameraFacing, width: 400, height: 400 } : false };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       activeStream.current = stream;
+
+      // Сразу привязываем видео для превью
+      if (type === 'video' && videoPreviewRef.current) {
+        videoPreviewRef.current.srcObject = stream;
+      }
+
       const options = { mimeType: type === 'video' ? 'video/webm;codecs=vp8' : 'audio/webm' };
       mediaRecorder.current = new MediaRecorder(stream, options);
       audioChunks.current = [];
@@ -606,7 +636,6 @@ export default function App() {
     isHolding.current = false;
   };
 
-  // Переворот камеры "на лету" без остановки записи
   const flipCamera = async (e) => {
     if (e) { e.preventDefault(); e.stopPropagation(); }
     const nextFacing = cameraFacing === 'user' ? 'environment' : 'user';
@@ -633,7 +662,6 @@ export default function App() {
     }
   };
 
-  // Улучшенные обработчики Pointer для предотвращения багов с "кирпичностью" и удержанием
   const handlePointerDown = (e) => {
     isHolding.current = false;
     setIsLocked(false);
@@ -646,7 +674,7 @@ export default function App() {
 
   const handlePointerMove = (e) => {
     if (isHolding.current && !isLocked) {
-      if (startY.current - e.clientY > 40) { // Свайп вверх на 40px фиксирует запись
+      if (startY.current - e.clientY > 40) {
         setIsLocked(true);
       }
     }
@@ -654,7 +682,7 @@ export default function App() {
 
   const handlePointerUp = (e) => {
     clearTimeout(pressTimer.current);
-    if (isLocked && isRecording) return; // Если запись заблокирована свайпом, не останавливаем
+    if (isLocked && isRecording) return;
 
     if (isHolding.current) {
       stopMediaRecording();
@@ -730,7 +758,6 @@ export default function App() {
     );
   };
 
-  // --- ЭКРАН ВХОДА ---
   if (!user) return (
       <div className="app-container">
         <style>{auraStyles(isDark)}</style>
@@ -762,7 +789,6 @@ export default function App() {
       <div className="app-container">
         <style>{auraStyles(isDark)}</style>
         <div className="phone-screen">
-          {/* ПЕРЕСЫЛКА УВЕДОМЛЕНИЕ */}
           {forwardMsg && (
               <div style={{position: 'absolute', top: 0, left: 0, right: 0, background: 'var(--ios-blue)', color: 'white', padding: 10, textAlign: 'center', zIndex: 1000, fontWeight: 'bold', animation: 'slideIn 0.3s ease'}}>
                 Выберите чат для пересылки...
@@ -770,7 +796,6 @@ export default function App() {
               </div>
           )}
 
-          {/* --- ЭКРАН ВХОДЯЩЕГО ЗВОНКА --- */}
           {incomingCall && !activeCall && (
               <div style={{position: 'absolute', inset: 0, zIndex: 10000, background: isDark ? 'rgba(28,28,30,0.95)' : 'rgba(255,255,255,0.95)', backdropFilter: 'blur(40px)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 80, paddingBottom: 60, animation: 'fadeIn 0.3s ease'}}>
                 <div style={{color: 'var(--text-main)', fontSize: 32, fontWeight: 'bold'}}>{incomingCall.peer?.name || incomingCall.caller}</div>
@@ -782,17 +807,16 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{display: 'flex', gap: 60, marginBottom: 20}}>
-                  <button onClick={declineCall} style={{background: '#FF3B30', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(255,59,48,0.4)', transition: 'transform 0.1s'}} onMouseDown={e => e.currentTarget.style.transform='scale(0.9)'} onMouseUp={e => e.currentTarget.style.transform='scale(1)'}>
+                  <button onClick={declineCall} style={{background: '#FF3B30', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(255,59,48,0.4)'}}>
                     <Phone size={36} color="white" style={{transform: 'rotate(135deg)'}} />
                   </button>
-                  <button onClick={answerCall} style={{background: '#34C759', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(52,199,89,0.4)', transition: 'transform 0.1s', animation: 'popIn 0.5s infinite alternate'}} onMouseDown={e => e.currentTarget.style.transform='scale(0.9)'} onMouseUp={e => e.currentTarget.style.transform='scale(1)'}>
+                  <button onClick={answerCall} style={{background: '#34C759', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(52,199,89,0.4)', animation: 'popIn 0.5s infinite alternate'}}>
                     <Phone size={36} color="white" />
                   </button>
                 </div>
               </div>
           )}
 
-          {/* --- ЭКРАН АКТИВНОГО ЗВОНКА --- */}
           {activeCall && (
               <div style={{position: 'absolute', inset: 0, zIndex: 9999, background: isDark ? 'rgba(28,28,30,0.85)' : 'rgba(255,255,255,0.85)', backdropFilter: 'blur(40px)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 60, paddingBottom: 40, animation: 'fadeIn 0.3s ease'}}>
                 <audio ref={remoteAudioRef} autoPlay />
@@ -816,14 +840,13 @@ export default function App() {
                   )}
                 </div>
                 <div style={{display: 'flex', gap: 40, marginBottom: 20}}>
-                  <button onClick={endCall} style={{background: '#FF3B30', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(255,59,48,0.4)', transition: 'transform 0.1s'}} onMouseDown={e => e.currentTarget.style.transform='scale(0.9)'} onMouseUp={e => e.currentTarget.style.transform='scale(1)'}>
+                  <button onClick={endCall} style={{background: '#FF3B30', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(255,59,48,0.4)'}}>
                     <Phone size={36} color="white" style={{transform: 'rotate(135deg)'}} />
                   </button>
                 </div>
               </div>
           )}
 
-          {/* --- ЭКРАН ЧАТОВ --- */}
           {view === 'chats' && (
               <div className="view-container" style={{paddingTop: forwardMsg ? 40 : 0}}>
                 <div className="nav-bar glass-panel"><div style={{fontSize: 32, fontWeight: 800}}>Чаты</div><Edit3 size={24} color="var(--ios-blue)" /></div>
@@ -834,7 +857,7 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{flex: 1, overflowY: 'auto'}}>
-                  {(!searchQuery || 'общий чат global'.includes(searchQuery.toLowerCase())) && (() => {
+                  {(!searchQuery || 'общий чат global'.includes(searchQuery.toLowerCase().trim())) && (() => {
                     const lastGlobal = getLastMessage('global');
                     return (
                         <button className="ios-item" onClick={() => { setSelectedPeer({name: 'Общий чат', username: 'global'}); setView('chat_room'); if(forwardMsg){ sendMessage(forwardMsg.text, forwardMsg.type, forwardMsg.name); setForwardMsg(null); } }}>
@@ -876,7 +899,6 @@ export default function App() {
               </div>
           )}
 
-          {/* --- ЭКРАН ИСТОРИИ ЗВОНКОВ --- */}
           {view === 'calls' && (
               <div className="view-container">
                 <div className="nav-bar glass-panel"><div style={{fontSize: 32, fontWeight: 800}}>Звонки</div><Phone size={24} color="var(--ios-blue)" /></div>
@@ -909,7 +931,6 @@ export default function App() {
               </div>
           )}
 
-          {/* --- ЭКРАН НАСТРОЕК (ПРОФИЛЬ) --- */}
           {view === 'settings' && (
               <div className="view-container">
                 <div className="nav-bar glass-panel"><div style={{fontSize: 32, fontWeight: 800}}>Настройки</div></div>
@@ -945,7 +966,6 @@ export default function App() {
               </div>
           )}
 
-          {/* --- ЭКРАН ЧАТА --- */}
           {view === 'chat_room' && selectedPeer && (
               <div className="view-container" style={{position: 'absolute', inset: 0, zIndex: 20}}>
                 <div className="nav-bar glass-panel" style={{paddingTop: 45, paddingBottom: 10, flexDirection: 'column', alignItems: 'stretch'}}>
@@ -968,24 +988,57 @@ export default function App() {
                   {currentMessages.map((m) => <React.Fragment key={m.id}>{renderMessageContent(m)}</React.Fragment>)}
                 </div>
 
-                {/* Оверлей записи (с замком и переворотом камеры) */}
-                {isRecording && (
+                {/* ОГРОМНЫЙ ОВЕРЛЕЙ ДЛЯ ВИДЕОКРУЖКА КАК В ТЕЛЕГРАММЕ */}
+                {isRecording === 'video' ? (
+                    <div style={{
+                      position: 'absolute', inset: 0, zIndex: 3000,
+                      background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)',
+                      backdropFilter: 'blur(15px)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                      animation: 'fadeIn 0.2s ease',
+                      pointerEvents: isLocked ? 'auto' : 'none'
+                    }}>
+                      {/* Огромное видео по центру */}
+                      <div style={{
+                        width: 280, height: 280, borderRadius: '50%', overflow: 'hidden',
+                        border: '5px solid var(--ios-blue)', boxShadow: '0 20px 50px rgba(0,0,0,0.3)',
+                        position: 'relative'
+                      }}>
+                        <video ref={videoPreviewRef} autoPlay muted playsInline
+                               style={{width: '100%', height: '100%', objectFit: 'cover', transform: cameraFacing === 'user' ? 'scaleX(-1)' : 'scaleX(1)'}} />
+                      </div>
+
+                      {/* Таймер */}
+                      <div style={{marginTop: 30, display: 'flex', alignItems: 'center', gap: 10, color: '#FF3B30', fontWeight: 'bold', fontSize: 28, textShadow: '0 2px 10px rgba(0,0,0,0.2)'}}>
+                        <div style={{width: 14, height: 14, borderRadius: '50%', background: '#FF3B30', animation: 'pulseGlow 1s infinite'}} />
+                        {formatTime(recTime)}
+                      </div>
+
+                      {/* Кнопки появляются только после фиксации свайпом вверх */}
+                      {isLocked ? (
+                          <div style={{display: 'flex', alignItems: 'center', gap: 40, marginTop: 40}}>
+                            <button onClick={cancelMediaRecording} style={{background: '#FF3B30', color: 'white', borderRadius: '50%', width: 60, height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 5px 15px rgba(255,59,48,0.4)'}}>
+                              <Trash2 size={28} />
+                            </button>
+                            <button onClick={flipCamera} style={{background: 'var(--card-bg)', color: 'var(--text-main)', border: '1px solid var(--sep)', borderRadius: '50%', width: 60, height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)'}}>
+                              <RefreshCw size={28} />
+                            </button>
+                            <button onClick={() => { stopMediaRecording(); setIsLocked(false); }} style={{background: 'var(--ios-blue)', color: 'white', borderRadius: '50%', width: 70, height: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,122,255,0.4)'}}>
+                              <Send size={32} />
+                            </button>
+                          </div>
+                      ) : (
+                          <div style={{marginTop: 40, color: 'var(--text-main)', display: 'flex', flexDirection: 'column', alignItems: 'center', opacity: 0.7}}>
+                            <Lock size={28} style={{marginBottom: 10}} />
+                            <span style={{fontSize: 16, fontWeight: 500}}>Свайп вверх для фиксации</span>
+                          </div>
+                      )}
+                    </div>
+                ) : isRecording === 'voice' ? (
+                    // Обычный блок снизу для записи голоса
                     <div style={{position: 'absolute', bottom: 85, left: 0, right: 0, display: 'flex', justifyContent: 'center', zIndex: 150}}>
                       <div className="glass-panel" style={{borderRadius: 40, padding: '8px 20px 8px 8px', display: 'flex', alignItems: 'center', gap: 15, boxShadow: '0 10px 25px rgba(0,0,0,0.2)', border: '1px solid var(--sep)'}}>
-
-                        {isRecording === 'video' ? (
-                            <div style={{position: 'relative'}}>
-                              <div style={{width: 80, height: 80, borderRadius: '50%', overflow: 'hidden', border: '3px solid var(--ios-blue)'}}>
-                                <video ref={videoPreviewRef} autoPlay muted playsInline style={{width: '100%', height: '100%', objectFit: 'cover', transform: cameraFacing === 'user' ? 'scaleX(-1)' : 'scaleX(1)'}} />
-                              </div>
-                              <button onPointerDown={flipCamera} style={{position: 'absolute', top: -5, right: -5, background: 'var(--card-bg)', border: '1px solid var(--sep)', borderRadius: '50%', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 10, boxShadow: '0 2px 5px rgba(0,0,0,0.2)'}}>
-                                <RefreshCw size={16} color="var(--text-main)" />
-                              </button>
-                            </div>
-                        ) : (
-                            <div style={{width: 50, height: 50, borderRadius: '50%', background: 'var(--ios-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center'}}><Mic size={24} color="white" /></div>
-                        )}
-
+                        <div style={{width: 50, height: 50, borderRadius: '50%', background: 'var(--ios-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center'}}><Mic size={24} color="white" /></div>
                         <div style={{display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 100}}>
                           <div style={{display: 'flex', alignItems: 'center', gap: 8, color: '#FF3B30', fontWeight: 'bold', fontSize: 18}}>
                             <div style={{width: 10, height: 10, borderRadius: '50%', background: '#FF3B30', animation: 'pulseGlow 1s infinite'}} />{formatTime(recTime)}
@@ -998,16 +1051,14 @@ export default function App() {
                               <button onClick={cancelMediaRecording} style={{background: 'none', border: 'none', color: 'var(--text-sec)', fontSize: 14, marginTop: 4, cursor: 'pointer', textAlign: 'left', outline: 'none'}}>Отменить</button>
                           )}
                         </div>
-
                         {isLocked && (
                             <button onClick={() => { stopMediaRecording(); setIsLocked(false); }} style={{background: 'var(--ios-blue)', color: 'white', borderRadius: '50%', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', marginLeft: 5}}>
                               <Send size={20} />
                             </button>
                         )}
-
                       </div>
                     </div>
-                )}
+                ) : null}
 
                 {showStickers && (
                     <div className="glass-panel" style={{position: 'absolute', bottom: 65, left: 0, right: 0, height: 180, zIndex: 40, overflowX: 'auto', display: 'flex', alignItems: 'center', padding: '0 16px', gap: 16}}>
@@ -1035,7 +1086,7 @@ export default function App() {
                           onPointerLeave={handlePointerUp}
                           onPointerCancel={handlePointerUp}
                           style={{
-                            touchAction: 'none', // Запрещает скролл при касании, убирая дерганные срабатывания (баг с кирпичностью)
+                            touchAction: 'none',
                             background: 'none', border: 'none',
                             color: isRecording ? '#FF3B30' : 'var(--text-sec)',
                             cursor: 'pointer', paddingBottom: 6,
@@ -1052,7 +1103,6 @@ export default function App() {
               </div>
           )}
 
-          {/* --- КОНТЕКСТНОЕ МЕНЮ БЛЮРА --- */}
           {contextMenu && (
               <div className="blur-overlay" onClick={closeContextMenu}>
                 {contextMenu.type === 'message' && (
@@ -1075,7 +1125,6 @@ export default function App() {
               </div>
           )}
 
-          {/* --- НИЖНЕЕ МЕНЮ (TAB BAR) --- */}
           {view !== 'chat_room' && (
               <div className="tab-bar glass-panel">
                 <button className={`tab-item ${view === 'chats' ? 'active' : ''}`} onClick={() => setView('chats')}><MessageCircle size={28} /><span>Чаты</span></button>
