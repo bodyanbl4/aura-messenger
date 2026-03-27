@@ -1,0 +1,27 @@
+{
+  "name": "aura-messenger",
+  "version": "1.0.0",
+  "description": "Серверная часть мессенджера Aura с поддержкой Telegram-авторизации",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "node",
+    "express",
+    "socket.io",
+    "messenger"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "firebase": "^12.11.0",
+    "lucide-react": "^1.7.0",
+    "socket.io": "^4.7.2",
+    "socket.io-client": "^4.8.3"
+  }
+}
