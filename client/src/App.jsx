@@ -9,7 +9,7 @@ import {
 import {
   Search, MessageCircle, ChevronLeft, Send, User as UserIcon, LogOut, Moon,
   Camera, ChevronRight, Globe, Edit3, Mic, Check, CheckCheck, Paperclip,
-  Trash, Trash2, Pin, Smile, Forward, Play
+  Trash, Trash2, Pin, Smile, Forward, Play, Phone, Video
 } from 'lucide-react';
 
 // --- 🔑 КОНФИГУРАЦИЯ FIREBASE ---
@@ -29,6 +29,7 @@ const app = !getApps().length ? initializeApp(envConfig) : getApps()[0];
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+// Анимированные стикеры (Стилизованы под 3D)
 const ANIMATED_STICKERS = [
   'https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.gif',
   'https://fonts.gstatic.com/s/e/notoemoji/latest/2764_fe0f/512.gif',
@@ -36,6 +37,8 @@ const ANIMATED_STICKERS = [
   'https://fonts.gstatic.com/s/e/notoemoji/latest/1f60e/512.gif',
   'https://fonts.gstatic.com/s/e/notoemoji/latest/1f973/512.gif',
   'https://fonts.gstatic.com/s/e/notoemoji/latest/1f44d/512.gif',
+  'https://fonts.gstatic.com/s/e/notoemoji/latest/1f92f/512.gif', // Взрыв мозга
+  'https://fonts.gstatic.com/s/e/notoemoji/latest/1f47d/512.gif', // Пришелец
 ];
 
 const auraStyles = (isDark) => `
@@ -61,6 +64,7 @@ const auraStyles = (isDark) => `
   @keyframes slideIn { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
   @keyframes popIn { 0% { transform: scale(0.95) translateY(10px); opacity: 0; } 100% { transform: scale(1) translateY(0); opacity: 1; } }
   @keyframes pulseGlow { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+  @keyframes callPulse { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(1.8); opacity: 0; } }
   
   .ios-input { width: 100%; padding: 14px 16px; border-radius: 12px; border: 1.5px solid var(--sep); background: ${isDark ? '#2C2C2E' : '#FFFFFF'}; color: var(--text-main); font-size: 16px; outline: none; }
   .btn-primary { width: 100%; padding: 16px; background: var(--ios-blue); color: white; border: none; border-radius: 16px; font-weight: 700; font-size: 17px; cursor: pointer; }
@@ -79,13 +83,21 @@ const auraStyles = (isDark) => `
   .bubble-me { background: var(--bubble-me); color: var(--bubble-me-text); align-self: flex-end; border-bottom-right-radius: 4px; }
   .bubble-other { background: var(--card-bg); color: var(--text-main); align-self: flex-start; border-bottom-left-radius: 4px; }
   
+  .system-bubble { align-self: center; background: rgba(0,0,0,0.3); color: white; padding: 6px 14px; border-radius: 16px; font-size: 13px; font-weight: 500; backdrop-filter: blur(10px); margin: 10px 0; text-align: center; max-width: 90%; }
+
   .circle-video-wrap { width: 220px; height: 220px; border-radius: 50%; overflow: hidden; border: 3px solid ${isDark ? '#31A24C' : '#E1FFC7'}; background: #000; position: relative; cursor: pointer; flex-shrink: 0; }
   .circle-video-wrap video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); pointer-events: none; }
   .unread-dot { position: absolute; bottom: 20px; right: 20px; width: 14px; height: 14px; background: white; border-radius: 50%; box-shadow: 0 0 10px rgba(0,0,0,0.5); border: 2px solid var(--ios-blue); }
   
   .reaction-badge { position: absolute; bottom: -10px; right: -10px; background: var(--card-bg); border-radius: 12px; padding: 2px 6px; font-size: 14px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); border: 1px solid var(--sep); }
   
-  .sticker-img { width: 120px; height: 120px; object-fit: contain; animation: popIn 0.4s; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.1)); }
+  /* 3D СТИКЕРЫ (Эффект объема) */
+  .sticker-img-3d { 
+    width: 120px; height: 120px; object-fit: contain; animation: popIn 0.4s; 
+    filter: drop-shadow(0 12px 15px rgba(0,0,0,0.4)) saturate(1.3) contrast(1.1); 
+    transform-style: preserve-3d; perspective: 1000px;
+  }
+  
   .attachment-img { max-width: 240px; max-height: 300px; border-radius: 12px; object-fit: cover; display: block; }
 
   .tab-bar { height: 85px; border-top: 0.5px solid var(--sep); display: flex; justify-content: space-around; padding-top: 10px; flex-shrink: 0; z-index: 100; }
@@ -107,6 +119,9 @@ const auraStyles = (isDark) => `
 
   .akashi-logo { width: 90px; height: 90px; background: #0a0a0a; border-radius: 24px; margin: 0 auto 25px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; box-shadow: 0 0 30px rgba(220,38,38,0.4); border: 1px solid rgba(239,68,68,0.2); }
   .akashi-glow { position: absolute; inset: 0; background: rgba(220,38,38,0.25); filter: blur(15px); border-radius: 50%; }
+
+  /* АНИМАЦИИ ДЛЯ ЗВОНКОВ */
+  .call-ring { position: absolute; inset: 0; border-radius: 50%; background: var(--ios-blue); z-index: 0; animation: callPulse 2s infinite ease-out; }
 `;
 
 export default function App() {
@@ -129,17 +144,24 @@ export default function App() {
   const [recTime, setRecTime] = useState(0);
   const [contextMenu, setContextMenu] = useState(null);
   const [showStickers, setShowStickers] = useState(false);
-  const [forwardMsg, setForwardMsg] = useState(null); // Сообщение для пересылки
+  const [forwardMsg, setForwardMsg] = useState(null);
+
+  // Состояния звонка
+  const [activeCall, setActiveCall] = useState(null); // { type: 'voice'|'video', peer: User, status: 'calling'|'connected' }
+  const [callDuration, setCallDuration] = useState(0);
 
   const scrollRef = useRef();
   const fileInputRef = useRef(null);
   const mediaRecorder = useRef(null);
   const videoPreviewRef = useRef(null);
+  const callVideoRef = useRef(null);
   const audioChunks = useRef([]);
   const activeStream = useRef(null);
+  const callStream = useRef(null);
   const pressTimer = useRef(null);
+  const callTimer = useRef(null);
   const isHolding = useRef(false);
-  let lastTap = 0; // Для двойного клика
+  let lastTap = 0;
 
   useEffect(() => {
     const initAuth = async () => {
@@ -177,7 +199,6 @@ export default function App() {
     return () => { unsubU(); unsubM(); };
   }, [firebaseUser, user?.username]);
 
-  // Скрипт прочтения сообщений (Галочки)
   useEffect(() => {
     if (view === 'chat_room' && selectedPeer && selectedPeer.username !== 'global') {
       const unread = messages.filter(m => m.to === user.username && m.uid === selectedPeer.username && !m.read);
@@ -191,13 +212,38 @@ export default function App() {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, view, selectedPeer, showStickers]);
 
-  // Фикс черного экрана при записи
   useEffect(() => {
     if (activeStream.current && videoPreviewRef.current && isRecording === 'video') {
       videoPreviewRef.current.srcObject = activeStream.current;
       videoPreviewRef.current.onloadedmetadata = () => videoPreviewRef.current.play().catch(console.error);
     }
   }, [isRecording]);
+
+  // Эффект для Звонков
+  useEffect(() => {
+    if (activeCall?.status === 'connected' && activeCall.type === 'video') {
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true })
+          .then(stream => {
+            callStream.current = stream;
+            if (callVideoRef.current) {
+              callVideoRef.current.srcObject = stream;
+              callVideoRef.current.play();
+            }
+          }).catch(e => console.error("Video Call Error:", e));
+    }
+
+    if (activeCall?.status === 'connected') {
+      callTimer.current = setInterval(() => setCallDuration(p => p + 1), 1000);
+    }
+
+    return () => {
+      if (callStream.current && (!activeCall || activeCall.status !== 'connected')) {
+        callStream.current.getTracks().forEach(t => t.stop());
+        callStream.current = null;
+      }
+      clearInterval(callTimer.current);
+    };
+  }, [activeCall?.status, activeCall?.type]);
 
   const showError = (msg) => { setGlobalError(msg); setTimeout(() => setGlobalError(null), 3000); };
 
@@ -217,6 +263,13 @@ export default function App() {
           };
           await setDoc(userRef, newUser);
           setUser(newUser); localStorage.setItem('aura_user', JSON.stringify(newUser));
+
+          // СИСТЕМНОЕ УВЕДОМЛЕНИЕ О РЕГИСТРАЦИИ (В ОБЩИЙ ЧАТ)
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
+            text: `${name || username} перешел в Aura! 🎉`,
+            uid: 'system', to: 'global', ts: Date.now(),
+            name: 'Aura System', type: 'system', hiddenFor: [], isPinned: false, read: true, watched: true, reactions: {}
+          });
         }
       } else {
         if (snap.exists() && snap.data().password === password) {
@@ -240,7 +293,6 @@ export default function App() {
     } catch (e) { showError("Ошибка отправки."); }
   };
 
-  // Двойной тап (Лайк)
   const handleDoubleTap = (e, m) => {
     const now = Date.now();
     if (now - lastTap < 300) {
@@ -252,7 +304,6 @@ export default function App() {
     lastTap = now;
   };
 
-  // Контекстное меню
   const openContextMenu = (e, item, type) => {
     e.preventDefault(); e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
@@ -260,17 +311,16 @@ export default function App() {
   };
   const closeContextMenu = () => setContextMenu(null);
 
-  // Фикс удаления
   const deleteMessage = async (deleteType) => {
     if (!contextMenu || contextMenu.type !== 'message') return;
     const msgId = contextMenu.item.id;
     const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId);
     try {
       if (deleteType === 'both') {
-        await deleteDoc(msgRef); // Физически удаляем документ
+        await deleteDoc(msgRef);
       } else {
         const currentHidden = contextMenu.item.hiddenFor || [];
-        await updateDoc(msgRef, { hiddenFor: [...currentHidden, user.username] }); // Скрываем у себя
+        await updateDoc(msgRef, { hiddenFor: [...currentHidden, user.username] });
       }
     } catch (e) { console.error("Delete Error", e); }
     closeContextMenu();
@@ -288,18 +338,30 @@ export default function App() {
     closeContextMenu();
   };
 
-  // Воспроизведение кружков по клику и снятие "непрочитанности"
   const handlePlayCircle = (e, m) => {
     const video = e.target;
     if (video.paused) { video.play(); } else { video.pause(); }
-
-    // Снимаем белую точку (просмотрено)
     if (!m.watched && m.uid !== user.username) {
       updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', m.id), { watched: true });
     }
   };
 
-  // МЕДИА (КРУЖКИ И ГОЛОСОВЫЕ)
+  // ФУНКЦИИ ДЛЯ ЗВОНКОВ
+  const startCall = (type) => {
+    setActiveCall({ type, peer: selectedPeer, status: 'calling' });
+    setCallDuration(0);
+    // Имитация ответа через 2.5 секунды
+    setTimeout(() => {
+      setActiveCall(prev => prev ? { ...prev, status: 'connected' } : null);
+    }, 2500);
+  };
+
+  const endCall = () => {
+    setActiveCall(null);
+    setCallDuration(0);
+    clearInterval(callTimer.current);
+  };
+
   const startMediaRecording = async (type) => {
     try {
       const constraints = { audio: true, video: type === 'video' ? { facingMode: 'user', width: 400, height: 400 } : false };
@@ -348,14 +410,28 @@ export default function App() {
     isHolding.current = false;
   };
 
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
   const currentMessages = messages.filter(m => {
     if (!selectedPeer) return false;
-    if (m.hiddenFor && m.hiddenFor.includes(user.username)) return false; // Исключаем удаленные у себя
+    if (m.hiddenFor && m.hiddenFor.includes(user.username)) return false;
     if (selectedPeer.username === 'global') return m.to === 'global';
     return (m.uid === user.username && m.to === selectedPeer.username) || (m.uid === selectedPeer.username && m.to === user.username);
   });
 
   const renderMessageContent = (m, isClone = false) => {
+    if (m.type === 'system') {
+      return (
+          <div key={m.id} className="system-bubble" style={{ margin: isClone ? 0 : '10px 0' }}>
+            {m.text}
+          </div>
+      );
+    }
+
     const isMine = m.uid === user.username;
     const isSticker = m.type === 'sticker';
     const isImage = m.type === 'image';
@@ -379,7 +455,6 @@ export default function App() {
           {isCircle ? (
               <div className="circle-video-wrap">
                 <video src={m.text} onClick={!isClone ? (e) => handlePlayCircle(e, m) : undefined} playsInline loop={false} />
-                {/* Непрочитанная белая точка у кружков */}
                 {!isMine && !m.watched && !isClone && <div className="unread-dot"></div>}
               </div>
           ) : m.type === 'voice' ? (
@@ -396,7 +471,7 @@ export default function App() {
           ) : isImage ? (
               <img src={m.text} className="attachment-img" alt="вложение" />
           ) : isSticker ? (
-              <img src={m.text} className="sticker-img" alt="стикер" />
+              <img src={m.text} className="sticker-img-3d" alt="3d стикер" />
           ) : (
               <div>{m.text}</div>
           )}
@@ -407,7 +482,6 @@ export default function App() {
             {isMine && (m.read ? <CheckCheck size={12} /> : <Check size={12} />)}
           </div>
 
-          {/* Реакции */}
           {m.reactions && Object.keys(m.reactions).length > 0 && !isClone && (
               <div className="reaction-badge">
                 {Array.from(new Set(Object.values(m.reactions))).join(' ')}
@@ -455,6 +529,33 @@ export default function App() {
               </div>
           )}
 
+          {/* --- ЭКРАН ЗВОНКА --- */}
+          {activeCall && (
+              <div style={{position: 'absolute', inset: 0, zIndex: 9999, background: isDark ? 'rgba(28,28,30,0.85)' : 'rgba(255,255,255,0.85)', backdropFilter: 'blur(40px)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 60, paddingBottom: 40, animation: 'fadeIn 0.3s ease'}}>
+                <div style={{color: 'var(--text-main)', fontSize: 32, fontWeight: 'bold', textShadow: '0 2px 10px rgba(0,0,0,0.2)'}}>{activeCall.peer.name}</div>
+                <div style={{color: 'var(--text-main)', fontSize: 18, marginTop: 8, opacity: 0.8}}>
+                  {activeCall.status === 'calling' ? 'Звонок...' : `На связи ${formatTime(callDuration)}`}
+                </div>
+
+                <div style={{flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', padding: 20}}>
+                  {activeCall.type === 'video' && activeCall.status === 'connected' ? (
+                      <video ref={callVideoRef} autoPlay muted playsInline style={{width: '100%', height: '100%', objectFit: 'cover', borderRadius: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.3)', transform: 'scaleX(-1)'}} />
+                  ) : (
+                      <div style={{position: 'relative', width: 160, height: 160}}>
+                        {activeCall.status === 'calling' && <div className="call-ring"></div>}
+                        <img src={activeCall.peer.avatar} style={{width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', border: '4px solid var(--ios-blue)', position: 'relative', zIndex: 10, boxShadow: '0 10px 30px rgba(0,0,0,0.3)'}} alt="caller" />
+                      </div>
+                  )}
+                </div>
+
+                <div style={{display: 'flex', gap: 40, marginBottom: 20}}>
+                  <button onClick={endCall} style={{background: '#FF3B30', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(255,59,48,0.4)', transition: 'transform 0.1s'}} onMouseDown={e => e.currentTarget.style.transform='scale(0.9)'} onMouseUp={e => e.currentTarget.style.transform='scale(1)'}>
+                    <Phone size={36} color="white" style={{transform: 'rotate(135deg)'}} />
+                  </button>
+                </div>
+              </div>
+          )}
+
           {view === 'chats' && (
               <div className="view-container" style={{paddingTop: forwardMsg ? 40 : 0}}>
                 <div className="nav-bar glass-panel"><div style={{fontSize: 32, fontWeight: 800}}>Чаты</div><Edit3 size={24} color="var(--ios-blue)" /></div>
@@ -480,7 +581,10 @@ export default function App() {
                   <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}>
                     <button onClick={() => setView('chats')} style={{background: 'none', border: 'none', color: 'var(--ios-blue)', cursor: 'pointer', display: 'flex', alignItems: 'center'}}><ChevronLeft size={34} /></button>
                     <div style={{textAlign: 'center', flex: 1}}><b style={{fontSize: 17, display: 'block'}}>{selectedPeer.name}</b></div>
-                    <img src={selectedPeer.avatar || ''} className="avatar" style={{width: 38, height: 38}} />
+                    <div style={{display: 'flex', gap: 15, paddingRight: 5}}>
+                      <button onClick={() => startCall('voice')} style={{background:'none', border:'none', color:'var(--ios-blue)', cursor:'pointer'}}><Phone size={24}/></button>
+                      <button onClick={() => startCall('video')} style={{background:'none', border:'none', color:'var(--ios-blue)', cursor:'pointer'}}><Video size={26}/></button>
+                    </div>
                   </div>
                 </div>
 
@@ -509,7 +613,7 @@ export default function App() {
 
                 {showStickers && (
                     <div className="glass-panel" style={{position: 'absolute', bottom: 65, left: 0, right: 0, height: 180, zIndex: 40, overflowX: 'auto', display: 'flex', alignItems: 'center', padding: '0 16px', gap: 16}}>
-                      {ANIMATED_STICKERS.map((url, i) => <img key={i} src={url} style={{width: 70, height: 70, cursor: 'pointer'}} onClick={() => sendMessage(url, 'sticker')} alt="sticker" />)}
+                      {ANIMATED_STICKERS.map((url, i) => <img key={i} src={url} className="sticker-img-3d" style={{width: 80, height: 80, cursor: 'pointer'}} onClick={() => sendMessage(url, 'sticker')} alt="sticker" />)}
                     </div>
                 )}
 
