@@ -22,14 +22,14 @@ import {
 } from 'lucide-react';
 
 // --- БЕЗОПАСНАЯ ИНИЦИАЛИЗАЦИЯ FIREBASE ---
-// Функция для получения конфига без падения сборки
 const getFirebaseConfig = () => {
   try {
+    // Проверка наличия глобальной переменной конфигурации
     if (typeof __firebase_config !== 'undefined' && __firebase_config) {
       return JSON.parse(__firebase_config);
     }
   } catch (e) {
-    console.warn("Firebase config parse error", e);
+    console.warn("Firebase config check:", e);
   }
   return null;
 };
@@ -37,8 +37,9 @@ const getFirebaseConfig = () => {
 const firebaseConfig = getFirebaseConfig();
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'aura-messenger-v1';
 
-// Инициализируем Firebase только если есть конфиг и приложение еще не создано
 let app, auth, db;
+
+// Инициализируем только если есть валидный конфиг
 if (firebaseConfig && firebaseConfig.apiKey) {
   if (!getApps().length) {
     app = initializeApp(firebaseConfig);
@@ -130,7 +131,8 @@ const auraStyles = (isDark) => `
     height: 58px; border-radius: 20px; font-size: 18px; font-weight: 700; 
     margin-top: 15px; cursor: pointer; transition: 0.3s;
   }
-  .record-active { background: #FF3B30 !important; }
+  .record-active { background: #FF3B30 !important; animation: pulse 1s infinite; }
+  @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 `;
 
 export default function App() {
@@ -155,7 +157,7 @@ export default function App() {
   const audioChunks = useRef([]);
   const messagesEndRef = useRef(null);
 
-  // --- AUTH FIREBASE ---
+  // --- АВТОРИЗАЦИЯ FIREBASE ---
   useEffect(() => {
     if (!auth) return;
     const initAuth = async () => {
@@ -185,7 +187,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // --- SYNC DATA ---
+  // --- СИНХРОНИЗАЦИЯ С ОБЛАКОМ ---
   useEffect(() => {
     if (!firebaseUser || !db) return;
 
@@ -244,7 +246,7 @@ export default function App() {
   };
 
   const handleAuth = async () => {
-    if (!username || !password) return setError("Заполните все поля");
+    if (!username || !password) return setError("Заполните поля");
     if (!db) return setError("Сервис временно недоступен");
     setError("");
 

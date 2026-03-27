@@ -1,29 +1,15 @@
-{
-  "name": "aura-messenger",
-  "version": "1.0.0",
-  "description": "Серверная часть мессенджера Aura с поддержкой Telegram-авторизации",
-  "main": "server.js",
-  "type": "commonjs",
-  "scripts": {
-    "start": "node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [
-    "node",
-    "express",
-    "socket.io",
-    "messenger"
-  ],
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "@vercel/analytics": "^2.0.1",
-    "@vercel/speed-insights": "^2.0.0",
-    "cors": "^2.8.5",
-    "express": "^4.18.2",
-    "firebase": "^12.11.0",
-    "lucide-react": "^1.7.0",
-    "socket.io": "^4.7.2",
-    "socket.io-client": "^4.8.3"
-  }
+"dependencies": {
+"firebase": "^10.0.0",
+"lucide-react": "^0.263.1",
+"react": "^18.2.0",
+"react-dom": "^18.2.0",
+"socket.io-client": "^4.7.2"
 }
+2.  **Запусти принудительную установку:** В терминале (папка `client`) выполни:
+```bash
+npm install
+3.  **Сделай Пуш с принудительным обновлением:**
+```bash
+git add .
+git commit -m "Force include firebase in package.json and safe init"
+git push origin main
