@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc } from 'firebase/firestore';
 import {
   Search, MessageCircle, ChevronLeft, Send, Phone, Plus,
@@ -19,11 +19,11 @@ const firebaseConfig = {
   measurementId: "G-9X9QMW22Z1"
 };
 
-// Глобальные переменные окружения (если доступны)
+// Глобальные переменные окружения (предоставляются средой выполнения)
 const envConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : firebaseConfig;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'aura-pro-v26';
 
-// Инициализация
+// Инициализация сервисов Firebase
 const app = !getApps().length ? initializeApp(envConfig) : getApps()[0];
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -94,10 +94,11 @@ const auraStyles = (isDark) => `
 `;
 
 export default function App() {
-  const [user, setUser] = useState(null);
+  const [firebaseUser, setFirebaseUser] = useState(null); // Техническое состояние Auth
+  const [user, setUser] = useState(null); // Профиль пользователя в приложении
   const [isDark, setIsDark] = useState(localStorage.getItem('aura_dark') === 'true');
-  const [view, setView] = useState('chats'); // chats, settings, chat_room, profile_edit
-  const [authStep, setAuthStep] = useState('login'); // login, reg
+  const [view, setView] = useState('chats');
+  const [authStep, setAuthStep] = useState('login');
 
   const [allUsers, setAllUsers] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -113,32 +114,68 @@ export default function App() {
   const mediaRecorder = useRef(null);
   const audioChunks = useRef([]);
 
-  // --- Инициализация Auth и Sync ---
+  // --- ЭТАП 1: ИНИЦИАЛИЗАЦИЯ AUTH (ПРАВИЛО 3) ---
   useEffect(() => {
-    const init = async () => {
+    const initAuth = async () => {
       try {
-        await signInAnonymously(auth);
-        const saved = localStorage.getItem('aura_user');
-        if (saved) setUser(JSON.parse(saved));
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
       } catch (e) {
-        console.error("Firebase Auth Error", e);
+        console.error("Firebase Auth Error:", e);
       }
     };
-    init();
 
-    if (db) {
-      const unsubUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (s) => {
-        setAllUsers(s.docs.map(d => d.data()));
-      });
+    initAuth();
 
-      const unsubMsgs = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (s) => {
-        const msgs = s.docs.map(d => d.data()).sort((a,b) => a.ts - b.ts);
-        setMessages(msgs);
-      });
+    // Слушаем изменение состояния авторизации
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setFirebaseUser(u);
+      // Если технический пользователь есть, пытаемся восстановить профиль Aura из LocalStorage
+      const saved = localStorage.getItem('aura_user');
+      if (saved) {
+        try {
+          setUser(JSON.parse(saved));
+        } catch (e) {
+          localStorage.removeItem('aura_user');
+        }
+      }
+    });
 
-      return () => { unsubUsers(); unsubMsgs(); };
-    }
+    return () => unsubscribe();
   }, []);
+
+  // --- ЭТАП 2: СИНХРОНИЗАЦИЯ ДАННЫХ (ТОЛЬКО ПРИ НАЛИЧИИ AUTH) ---
+  useEffect(() => {
+    // Ждем, пока firebaseUser станет доступен (ПРАВИЛО 3)
+    if (!firebaseUser) return;
+
+    // Слушаем пользователей (ПРАВИЛО 1)
+    const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
+    const unsubUsers = onSnapshot(usersRef,
+        (s) => {
+          setAllUsers(s.docs.map(d => d.data()));
+        },
+        (err) => console.error("Firestore Users Error:", err)
+    );
+
+    // Слушаем сообщения (ПРАВИЛО 1 и 2)
+    const msgsRef = collection(db, 'artifacts', appId, 'public', 'data', 'messages');
+    const unsubMsgs = onSnapshot(msgsRef,
+        (s) => {
+          const msgsData = s.docs.map(d => d.data()).sort((a,b) => a.ts - b.ts);
+          setMessages(msgsData);
+        },
+        (err) => console.error("Firestore Messages Error:", err)
+    );
+
+    return () => {
+      unsubUsers();
+      unsubMsgs();
+    };
+  }, [firebaseUser]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -151,6 +188,12 @@ export default function App() {
       setErrorMsg("Заполните логин и пароль");
       return;
     }
+
+    if (!firebaseUser) {
+      setErrorMsg("Подключение к серверу... Попробуйте через секунду");
+      return;
+    }
+
     setLoading(true);
     setErrorMsg('');
 
@@ -183,7 +226,7 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
-      setErrorMsg("Ошибка базы данных. Проверьте настройки Firebase.");
+      setErrorMsg("Ошибка базы данных. Проверьте права доступа.");
       setLoading(false);
     }
   };
@@ -196,12 +239,14 @@ export default function App() {
 
   const sendMessage = async (val, type = 'text') => {
     if (!val.trim() && type === 'text') return;
+    if (!firebaseUser) return;
+
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
         text: val, uid: user.username, ts: Date.now(), type, name: user.name
       });
       setInput('');
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("Send Error:", e); }
   };
 
   const startRecord = async () => {
@@ -264,9 +309,9 @@ export default function App() {
             <button
                 className="btn-primary"
                 onClick={handleAuth}
-                disabled={loading}
+                disabled={loading || !firebaseUser}
             >
-              {loading ? 'Загрузка...' : 'Продолжить'}
+              {loading ? 'Загрузка...' : !firebaseUser ? 'Подключение...' : 'Продолжить'}
             </button>
 
             <button
@@ -397,6 +442,7 @@ export default function App() {
                     <div className="ios-item"><input className="ios-input" style={{margin: 0, border: 'none'}} defaultValue={user.bio} onChange={e => setFormData({...formData, bio: e.target.value})} placeholder="О себе" /></div>
                   </div>
                   <button className="btn-primary" onClick={async () => {
+                    if (!firebaseUser) return;
                     const ref = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.username);
                     const updates = { name: formData.name || user.name, bio: formData.bio || user.bio };
                     await updateDoc(ref, updates);
