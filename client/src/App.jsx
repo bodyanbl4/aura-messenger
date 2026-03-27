@@ -318,7 +318,7 @@ export default function App() {
       if (val.length > 950000) return showError("Файл слишком большой.");
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
         text: val, uid: user.username, to: selectedPeer.username, ts: Date.now(),
-        name: user.name, type, hiddenFor: [], isPinned: false, read: false, watched: false,
+        name: user.name || user.username, type, hiddenFor: [], isPinned: false, read: false, watched: false,
         reactions: {}, forwardedFrom: forwardedFrom
       });
       setInput(''); setShowStickers(false);
@@ -336,7 +336,7 @@ export default function App() {
       } else {
         currentReactions[user.username] = '❤️';
       }
-      updateDoc(msgRef, { reactions: currentReactions });
+      updateDoc(msgRef, { reactions: currentReactions }).catch(console.error);
     }
     lastTapRef.current = now;
   };
@@ -499,7 +499,10 @@ export default function App() {
 
   // --- ХЕЛПЕРЫ ---
   const formatTime = (seconds) => { const m = Math.floor(seconds / 60); const s = seconds % 60; return `${m}:${s < 10 ? '0' : ''}${s}`; };
-  const formatTimeOnly = (ts) => new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+  const formatTimeOnly = (ts) => {
+    if (!ts) return '';
+    try { return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch(e) { return ''; }
+  };
 
   const getLastMessage = (peerUsername) => {
     if (peerUsername === 'global') {
@@ -515,7 +518,7 @@ export default function App() {
 
   const getMessagePreview = (msg) => {
     if (!msg) return "";
-    if (msg.type === 'text' || msg.type === 'system') return msg.text;
+    if (msg.type === 'text' || msg.type === 'system') return msg.text || '';
     if (msg.type === 'voice') return '🎤 Голосовое сообщение';
     if (msg.type === 'video_circle') return '📹 Видеосообщение';
     if (msg.type === 'image') return '🖼 Фотография';
@@ -523,9 +526,11 @@ export default function App() {
     return 'Вложение';
   };
 
-  const filteredUsers = allUsers.filter(u => u.username !== user.username).filter(u => {
+  // БЕЗОПАСНАЯ ФИЛЬТРАЦИЯ ПОЛЬЗОВАТЕЛЕЙ (Устраняет сбой, если u.name undefined)
+  const filteredUsers = allUsers.filter(u => u.username !== user?.username).filter(u => {
     if (!searchQuery) return true;
-    return u.name.toLowerCase().includes(searchQuery.toLowerCase()) || u.username.toLowerCase().includes(searchQuery.toLowerCase());
+    const lowerQ = searchQuery.toLowerCase().replace('@', '');
+    return (u.name || '').toLowerCase().includes(lowerQ) || (u.username || '').toLowerCase().includes(lowerQ);
   });
 
   const sortedUsers = filteredUsers.sort((a, b) => {
@@ -537,11 +542,87 @@ export default function App() {
 
   const myCallLogs = callLogs.filter(l => l.caller === user.username || l.callee === user.username);
 
+  const togglePinMessage = async () => {
+    if (!contextMenu || contextMenu.type !== 'message') return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', contextMenu.item.id), { isPinned: !contextMenu.item.isPinned });
+    closeContextMenu();
+  };
+
+  const togglePinChat = async () => {
+    if (!contextMenu || contextMenu.type !== 'chat') return;
+    const peerUsername = contextMenu.item.username;
+    const currentPinned = user.pinnedChats || [];
+    const isPinned = currentPinned.includes(peerUsername);
+    const newPinned = isPinned ? currentPinned.filter(u => u !== peerUsername) : [...currentPinned, peerUsername];
+    await updateProfile({ pinnedChats: newPinned });
+    closeContextMenu();
+  };
+
+  const handleForwardStart = () => {
+    setForwardMsg(contextMenu.item);
+    setView('chats');
+    closeContextMenu();
+  };
+
+  const startMediaRecording = async (type) => {
+    try {
+      const constraints = { audio: true, video: type === 'video' ? { facingMode: 'user', width: 400, height: 400 } : false };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      activeStream.current = stream;
+      const options = { mimeType: type === 'video' ? 'video/webm;codecs=vp8' : 'audio/webm' };
+      mediaRecorder.current = new MediaRecorder(stream, options);
+      audioChunks.current = [];
+      mediaRecorder.current.ondataavailable = e => { if (e.data.size > 0) audioChunks.current.push(e.data); };
+      mediaRecorder.current.onstop = () => {
+        if (mediaRecorder.current.cancelRecord) { stream.getTracks().forEach(t => t.stop()); activeStream.current = null; return; }
+        const blob = new Blob(audioChunks.current, { type: type === 'video' ? 'video/webm' : 'audio/webm' });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          sendMessage(reader.result, type === 'video' ? 'video_circle' : 'voice');
+          stream.getTracks().forEach(t => t.stop()); activeStream.current = null;
+        };
+        reader.readAsDataURL(blob);
+      };
+      mediaRecorder.current.start();
+      setIsRecording(type); setRecTime(0);
+      mediaRecorder.current.timer = setInterval(() => setRecTime(p => p + 1), 1000);
+    } catch (e) { showError("Нет доступа к камере или микрофону"); }
+  };
+
+  const stopMediaRecording = () => {
+    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
+      mediaRecorder.current.stop(); clearInterval(mediaRecorder.current.timer); setIsRecording(null);
+    }
+  };
+
+  const cancelMediaRecording = () => {
+    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
+      mediaRecorder.current.cancelRecord = true; mediaRecorder.current.stop(); clearInterval(mediaRecorder.current.timer); setIsRecording(null);
+    }
+  };
+
+  const handlePointerDown = (e) => {
+    e.preventDefault(); isHolding.current = false;
+    pressTimer.current = setTimeout(() => { isHolding.current = true; startMediaRecording(mode); }, 300);
+  };
+  const handlePointerUp = (e) => {
+    e.preventDefault(); clearTimeout(pressTimer.current);
+    if (isHolding.current) { stopMediaRecording(); } else { setMode(prev => prev === 'voice' ? 'video' : 'voice'); }
+    isHolding.current = false;
+  };
+
+  const currentMessages = messages.filter(m => {
+    if (!selectedPeer) return false;
+    if (m.hiddenFor && m.hiddenFor.includes(user.username)) return false;
+    if (selectedPeer.username === 'global') return m.to === 'global';
+    return (m.uid === user.username && m.to === selectedPeer.username) || (m.uid === selectedPeer.username && m.to === user.username);
+  });
+
   // --- КОМПОНЕНТЫ СООБЩЕНИЙ ---
   const renderMessageContent = (m, isClone = false) => {
     if (m.type === 'system') return <div key={m.id} className="system-bubble" style={{ margin: isClone ? 0 : '10px 0' }}>{m.text}</div>;
 
-    const isMine = m.uid === user.username;
+    const isMine = m.uid === user?.username;
     const isSticker = m.type === 'sticker';
     const isImage = m.type === 'image';
     const isCircle = m.type === 'video_circle';
@@ -557,39 +638,39 @@ export default function App() {
              onTouchMove={!isClone ? () => clearTimeout(pressTimer.current) : undefined}
         >
           {m.forwardedFrom && <div style={{fontSize: 12, color: isMine ? 'rgba(255,255,255,0.8)' : 'var(--ios-blue)', marginBottom: 4, display: 'flex', alignItems: 'center'}}><Forward size={12} className="mr-1"/> Переслано от {m.forwardedFrom}</div>}
-          {selectedPeer?.username === 'global' && !isMine && !isImage && !isSticker && !isCircle && <div style={{fontSize: 12, fontWeight: 700, marginBottom: 2, color: 'var(--ios-blue)'}}>{m.name}</div>}
+          {selectedPeer?.username === 'global' && !isMine && !isImage && !isSticker && !isCircle && <div style={{fontSize: 12, fontWeight: 700, marginBottom: 2, color: 'var(--ios-blue)'}}>{m.name || 'User'}</div>}
 
           {isCircle ? (
               <div className="circle-video-wrap">
-                <video src={m.text} onClick={!isClone ? (e) => { e.target.paused ? e.target.play() : e.target.pause(); if(!m.watched && !isMine) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', m.id), { watched: true }); } : undefined} playsInline loop={false} />
+                <video src={m.text || ''} onClick={!isClone ? (e) => { e.target.paused ? e.target.play() : e.target.pause(); if(!m.watched && !isMine) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', m.id), { watched: true }).catch(console.error); } : undefined} playsInline loop={false} />
                 {!isMine && !m.watched && !isClone && <div className="unread-dot"></div>}
               </div>
           ) : m.type === 'voice' ? (
               <div style={{display: 'flex', alignItems: 'center', gap: 10, minWidth: 150}}>
                 <div style={{background: isMine ? 'rgba(255,255,255,0.2)' : 'var(--ios-blue)', borderRadius: '50%', padding: 8}}><Mic size={16} color="white" /></div>
                 <div>
-                  {!isClone && <audio src={m.text} style={{display: 'none'}} id={`audio-${m.id}`} />}
-                  <div style={{height: 3, width: 80, background: 'rgba(0,0,0,0.2)', borderRadius: 2, cursor: 'pointer'}} onClick={() => !isClone && document.getElementById(`audio-${m.id}`).play()}>
+                  {!isClone && <audio src={m.text || ''} style={{display: 'none'}} id={`audio-${m.id}`} />}
+                  <div style={{height: 3, width: 80, background: 'rgba(0,0,0,0.2)', borderRadius: 2, cursor: 'pointer'}} onClick={() => { if(!isClone){ const a = document.getElementById(`audio-${m.id}`); if(a) a.play().catch(console.error); } }}>
                     <div style={{height: '100%', width: 0, background: isMine ? 'white' : 'var(--ios-blue)'}}></div>
                   </div>
                   <div style={{fontSize: 11, marginTop: 4, opacity: 0.8}}>Голосовое</div>
                 </div>
               </div>
           ) : isImage ? (
-              <img src={m.text} className="attachment-img" alt="вложение" />
+              <img src={m.text || ''} className="attachment-img" alt="вложение" />
           ) : isSticker ? (
-              <img src={m.text} className="sticker-img-3d" alt="3d стикер" />
+              <img src={m.text || ''} className="sticker-img-3d" alt="3d стикер" />
           ) : (
-              <div>{m.text}</div>
+              <div>{m.text || ''}</div>
           )}
 
           <div style={{fontSize: 10, opacity: 0.7, textAlign: 'right', marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3, position: isImage || isSticker || isCircle ? 'absolute' : 'relative', bottom: isImage || isSticker || isCircle ? 10 : 0, right: isImage || isSticker || isCircle ? (isCircle ? 30 : 10) : 0, background: isImage || isSticker || isCircle ? 'rgba(0,0,0,0.4)' : 'none', color: isImage || isSticker || isCircle ? 'white' : 'inherit', padding: isImage || isSticker || isCircle ? '2px 8px' : 0, borderRadius: 10}}>
             {m.isPinned && <Pin size={10} style={{marginRight: 2}} />}
-            {new Date(m.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+            {formatTimeOnly(m.ts)}
             {isMine && (m.read ? <CheckCheck size={12} /> : <Check size={12} />)}
           </div>
 
-          {m.reactions && Object.keys(m.reactions).length > 0 && !isClone && (
+          {m.reactions && typeof m.reactions === 'object' && Object.keys(m.reactions).length > 0 && !isClone && (
               <div className="reaction-badge">{Array.from(new Set(Object.values(m.reactions))).join(' ')}</div>
           )}
         </div>
