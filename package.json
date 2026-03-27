@@ -1,15 +1,29 @@
-"dependencies": {
-"firebase": "^10.0.0",
-"lucide-react": "^0.263.1",
-"react": "^18.2.0",
-"react-dom": "^18.2.0",
-"socket.io-client": "^4.7.2"
+{
+  "name": "aura-messenger-client",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "firebase": "^10.8.0",
+    "lucide-react": "^0.344.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "socket.io-client": "^4.7.4"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.56",
+    "@types/react-dom": "^18.2.19",
+    "@vitejs/plugin-react": "^4.2.1",
+    "eslint": "^8.56.0",
+    "eslint-plugin-react": "^7.33.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "vite": "^5.1.4"
+  }
 }
-2.  **Запусти принудительную установку:** В терминале (папка `client`) выполни:
-```bash
-npm install
-3.  **Сделай Пуш с принудительным обновлением:**
-```bash
-git add .
-git commit -m "Force include firebase in package.json and safe init"
-git push origin main
