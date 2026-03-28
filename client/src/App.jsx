@@ -32,7 +32,7 @@ const storage = getStorage(app);
 const rtcServers = {
   iceServers: [
     { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
-    // Бесплатные публичные TURN-серверы для обхода NAT (чтобы звонки работали не только по Wi-Fi)
+    // Бесплатные публичные TURN-серверы для обхода NAT
     { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
     { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
     { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
@@ -504,13 +504,15 @@ function MainApp() {
 
   const showError = (msg) => { setGlobalError(msg); setTimeout(() => setGlobalError(null), 3000); };
 
+  // --- АВТОРИЗАЦИЯ (ИСПРАВЛЕНО ВОССТАНОВЛЕНИЕ СТАРЫХ ЛОГИНОВ) ---
   const handleAuth = async () => {
     const { username, password, name } = formData;
     if (!username || !password) return showError("Введите логин и пароль");
     setLoading(true);
 
     try {
-      const safeUsername = username.trim();
+      // ИСПРАВЛЕНИЕ: Вернули toLowerCase(), чтобы вернуть доступ к старым чатам и аккаунтам!
+      const safeUsername = username.toLowerCase().trim();
 
       if (safeUsername.length < 3) {
         setLoading(false);
@@ -573,7 +575,7 @@ function MainApp() {
     setLoading(true);
 
     try {
-      const safeUsername = username.trim();
+      const safeUsername = username.toLowerCase().trim(); // Также возвращаем toLowerCase
       const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', safeUsername);
       const snap = await getDoc(userRef);
 
@@ -591,8 +593,79 @@ function MainApp() {
     setLoading(false);
   };
 
+  // --- 🛑 ЭКРАНЫ ЗАГРУЗКИ И АВТОРИЗАЦИИ 🛑 ---
+  // ВАЖНО: Размещаем защиту ЗДЕСЬ, до объявления функций, которые зависят от `user`
+
+  if (isRestoring) {
+    return (
+        <div className="app-container">
+          <style>{auraStyles(isDark)}</style>
+          <div style={{width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--ios-bg)', flexDirection: 'column'}}>
+            <div className="akashi-logo" style={{transform: 'scale(0.8)', animation: 'pulseGlow 1.5s infinite'}}>
+              <div className="akashi-glow"></div>
+              <svg viewBox="0 0 100 100" style={{width: 60, height: 60, position: 'relative', zIndex: 10, filter: 'drop-shadow(0 0 8px rgba(255,0,0,1))'}} fill="none">
+                <path d="M5 50 Q 50 15 95 50 Q 50 85 5 50 Z" stroke="#ef4444" strokeWidth="3" strokeOpacity="0.3" />
+                <circle cx="50" cy="50" r="20" stroke="#ef4444" strokeWidth="4" strokeOpacity="0.9" fill="rgba(239,68,68,0.1)"/>
+                <path d="M58 10 L40 52 L56 52 L38 90" stroke="#ff0000" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <div style={{color: 'var(--text-sec)', marginTop: 20, fontWeight: 'bold', fontSize: 16}}>Загрузка Aura...</div>
+          </div>
+        </div>
+    );
+  }
+
+  if (!user) return (
+      <div className="app-container">
+        <style>{auraStyles(isDark)}</style>
+        <div style={{width: '100%', maxWidth: 400, padding: 30, background: 'var(--card-bg)', borderRadius: 24, alignSelf: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.2)', animation: 'popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'}}>
+          {globalError && <div className={`error-toast ${globalError.startsWith('✅') ? 'success-toast' : ''}`}>{globalError}</div>}
+          <div className="akashi-logo">
+            <div className="akashi-glow"></div>
+            <svg viewBox="0 0 100 100" style={{width: 60, height: 60, position: 'relative', zIndex: 10, filter: 'drop-shadow(0 0 8px rgba(255,0,0,1))'}} fill="none">
+              <path d="M5 50 Q 50 15 95 50 Q 50 85 5 50 Z" stroke="#ef4444" strokeWidth="3" strokeOpacity="0.3" />
+              <circle cx="50" cy="50" r="20" stroke="#ef4444" strokeWidth="4" strokeOpacity="0.9" fill="rgba(239,68,68,0.1)"/>
+              <path d="M58 10 L40 52 L56 52 L38 90" stroke="#ff0000" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <h2 style={{textAlign: 'center', marginBottom: 25, fontSize: 24, fontWeight: 800}}>Вход в Aura</h2>
+          <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+
+            {authStep === 'reset' ? (
+                <>
+                  <input className="ios-input" placeholder="Логин" onChange={e => setFormData({...formData, username: e.target.value})} />
+                  <input className="ios-input" type="password" placeholder="Новый пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
+                  <button className="btn-primary" style={{marginTop: 10}} onClick={handleResetPassword}>{loading ? 'Загрузка...' : 'Сменить пароль'}</button>
+                  <button style={{background: 'none', border: 'none', color: 'var(--text-sec)', cursor: 'pointer', fontWeight: 600, marginTop: 10}} onClick={() => setAuthStep('login')}>
+                    Вернуться ко входу
+                  </button>
+                </>
+            ) : (
+                <>
+                  <input className="ios-input" placeholder="Логин" onChange={e => setFormData({...formData, username: e.target.value})} />
+                  <input className="ios-input" type="password" placeholder="Пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
+                  {authStep === 'reg' && <input className="ios-input" placeholder="Ваше имя" onChange={e => setFormData({...formData, name: e.target.value})} />}
+                  <button className="btn-primary" style={{marginTop: 10}} onClick={handleAuth}>{loading ? 'Загрузка...' : 'Продолжить'}</button>
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8}}>
+                    <button style={{background: 'none', border: 'none', color: 'var(--text-sec)', cursor: 'pointer', fontSize: 14}} onClick={() => setAuthStep('reset')}>
+                      Забыли пароль?
+                    </button>
+                    <button style={{background: 'none', border: 'none', color: 'var(--ios-blue)', cursor: 'pointer', fontWeight: 600, fontSize: 14}} onClick={() => setAuthStep(authStep === 'reg' ? 'login' : 'reg')}>
+                      {authStep === 'reg' ? 'Уже есть аккаунт?' : 'Создать аккаунт'}
+                    </button>
+                  </div>
+                </>
+            )}
+
+          </div>
+        </div>
+      </div>
+  );
+
+  // --- 🟢 ЗОНА БЕЗОПАСНОСТИ 🟢 ---
+  // Функции ниже запускаются ТОЛЬКО если `user` существует. Баг устранен!
+
   const updateProfile = async (updates) => {
-    if (!user) return;
     try {
       const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.username);
       await updateDoc(userRef, updates);
@@ -627,7 +700,6 @@ function MainApp() {
     try { return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch(e) { return ''; }
   };
 
-  // --- ЛОГИКА ОТПРАВКИ И ЗАПИСИ МЕДИА ---
   const sendMessage = async (val, type = 'text', forwardedFrom = null) => {
     if (!val.trim() && type === 'text') return;
     try {
@@ -811,8 +883,6 @@ function MainApp() {
     isHolding.current = false;
   };
 
-  // --- УПРАВЛЕНИЕ ЗВОНКАМИ И ЭКРАНОМ ---
-
   const toggleMicCall = () => {
     if (activeStream.current) {
       const audioTracks = activeStream.current.getAudioTracks();
@@ -904,7 +974,7 @@ function MainApp() {
       const callDocRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals'));
       const callId = callDocRef.id;
 
-      const candidateQueue = []; // Очередь для защиты от потери пакетов (ICE Race Condition)
+      const candidateQueue = [];
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
@@ -931,7 +1001,6 @@ function MainApp() {
           setActiveCall(prev => ({...prev, status: 'connected'}));
           callTimer.current = setInterval(() => setCallDuration(p => p + 1), 1000);
 
-          // Применяем накопленные кандидаты после установки удаленного описания
           candidateQueue.forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(console.error));
         }
         if (data.status === 'ended' || data.status === 'declined') endCallLocal();
@@ -972,7 +1041,6 @@ function MainApp() {
 
       const callDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId);
 
-      // Сразу устанавливаем RemoteDescription перед обработкой ICE
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
 
       pc.onicecandidate = (event) => {
@@ -1029,7 +1097,6 @@ function MainApp() {
     setIsMicMuted(false); setIsScreenSharing(false); setShowCallSettings(false);
   };
 
-  // --- КОНТЕКСТНОЕ МЕНЮ И ПРОЧЕЕ ---
   const handleReaction = async (emoji, e) => {
     if (e) { e.preventDefault(); e.stopPropagation(); }
 
