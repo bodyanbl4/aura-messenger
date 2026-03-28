@@ -26,7 +26,7 @@ const app = !getApps().length ? initializeApp(envConfig) : getApps()[0];
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// WebRTC STUN серверы для P2P соединения
+// WebRTC STUN серверы
 const rtcServers = {
   iceServers: [
     { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] }
@@ -59,7 +59,6 @@ const auraStyles = (isDark) => `
   }
   
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
-  /* ЖЕСТКАЯ ФИКСАЦИЯ ОКНА */
   body { 
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
     background: #000; color: var(--text-main); 
@@ -275,33 +274,52 @@ export default function App() {
 
   const showError = (msg) => { setGlobalError(msg); setTimeout(() => setGlobalError(null), 3000); };
 
+  // 🛡 ЗАЩИТА АВТОРИЗАЦИИ: Санитайзер логина + Отлов сетевых ошибок
   const handleAuth = async () => {
     const { username, password, name } = formData;
     if (!username || !password) return showError("Введите логин и пароль");
     setLoading(true);
+
     try {
-      const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', username.toLowerCase().trim());
+      // Убираем случайные пробелы, которые ломают базу данных
+      const safeUsername = username.toLowerCase().replace(/\s+/g, '');
+
+      if (safeUsername.length < 3) {
+        setLoading(false);
+        return showError("Логин должен быть от 3 символов без пробелов");
+      }
+
+      const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', safeUsername);
       const snap = await getDoc(userRef);
+
       if (authStep === 'reg') {
         if (snap.exists()) { showError("Пользователь уже существует! Войдите."); }
         else {
           const newUser = {
-            username: username.toLowerCase().trim(), password, name: name || username,
-            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`, privacy: 'online', pinnedChats: []
+            username: safeUsername, password, name: name || safeUsername,
+            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${safeUsername}`, privacy: 'online', pinnedChats: []
           };
           await setDoc(userRef, newUser);
-          setUser(newUser); localStorage.setItem('aura_user', JSON.stringify(newUser));
+          setUser(newUser);
+          localStorage.setItem('aura_user', JSON.stringify(newUser));
+
           await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
-            text: `${name || username} перешел в Aura! 🎉`, uid: 'system', to: 'global', ts: Date.now(),
+            text: `${name || safeUsername} перешел в Aura! 🎉`, uid: 'system', to: 'global', ts: Date.now(),
             name: 'Aura System', type: 'system', hiddenFor: [], isPinned: false, read: true, watched: true, reactions: {}
           });
         }
       } else {
         if (snap.exists() && snap.data().password === password) {
-          setUser(snap.data()); localStorage.setItem('aura_user', JSON.stringify(snap.data()));
-        } else { showError("Неверный логин или пароль!"); }
+          setUser(snap.data());
+          localStorage.setItem('aura_user', JSON.stringify(snap.data()));
+        } else {
+          showError("Неверный логин или пароль!");
+        }
       }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      showError("Ошибка соединения с сервером. Попробуйте еще раз.");
+    }
     setLoading(false);
   };
 
@@ -333,6 +351,174 @@ export default function App() {
     };
     reader.readAsDataURL(file);
   };
+
+  const formatTime = (seconds) => { const m = Math.floor(seconds / 60); const s = seconds % 60; return `${m}:${s < 10 ? '0' : ''}${s}`; };
+
+  const formatTimeOnly = (ts) => {
+    if (!ts) return '';
+    try { return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch(e) { return ''; }
+  };
+
+  // --- ЛОГИКА ЗАПИСИ МЕДИА ---
+  const startMediaRecording = async (type) => {
+    try {
+      const constraints = { audio: true, video: type === 'video' ? { facingMode: cameraFacing, width: 400, height: 400 } : false };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      activeStream.current = stream;
+
+      if (type === 'video' && videoPreviewRef.current) {
+        videoPreviewRef.current.srcObject = stream;
+      }
+
+      const options = { mimeType: type === 'video' ? 'video/webm;codecs=vp8' : 'audio/webm' };
+      mediaRecorder.current = new MediaRecorder(stream, options);
+      audioChunks.current = [];
+
+      mediaRecorder.current.ondataavailable = e => { if (e.data.size > 0) audioChunks.current.push(e.data); };
+
+      mediaRecorder.current.onstop = () => {
+        if (mediaRecorder.current.cancelRecord) { stream.getTracks().forEach(t => t.stop()); activeStream.current = null; return; }
+        const blob = new Blob(audioChunks.current, { type: type === 'video' ? 'video/webm' : 'audio/webm' });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          sendMessage(reader.result, type === 'video' ? 'video_circle' : 'voice');
+          stream.getTracks().forEach(t => t.stop()); activeStream.current = null;
+        };
+        reader.readAsDataURL(blob);
+      };
+
+      mediaRecorder.current.start();
+      setIsRecording(type); setRecTime(0); setIsPaused(false);
+      mediaRecorder.current.timer = setInterval(() => setRecTime(p => p + 1), 1000);
+    } catch (e) { showError("Нет доступа к камере или микрофону"); }
+  };
+
+  const stopMediaRecording = () => {
+    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
+      mediaRecorder.current.stop();
+      clearInterval(mediaRecorder.current.timer);
+    }
+    setIsRecording(null);
+    setIsLocked(false);
+    setIsPaused(false);
+  };
+
+  const cancelMediaRecording = () => {
+    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
+      mediaRecorder.current.cancelRecord = true;
+      mediaRecorder.current.stop();
+      clearInterval(mediaRecorder.current.timer);
+    }
+    setIsRecording(null);
+    setIsLocked(false);
+    setIsPaused(false);
+    isHolding.current = false;
+  };
+
+  const togglePause = () => {
+    if (mediaRecorder.current) {
+      if (mediaRecorder.current.state === 'recording') {
+        mediaRecorder.current.pause();
+        setIsPaused(true);
+        clearInterval(mediaRecorder.current.timer);
+      } else if (mediaRecorder.current.state === 'paused') {
+        mediaRecorder.current.resume();
+        setIsPaused(false);
+        mediaRecorder.current.timer = setInterval(() => setRecTime(p => p + 1), 1000);
+      }
+    }
+  };
+
+  const flipCamera = async (e) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    const nextFacing = cameraFacing === 'user' ? 'environment' : 'user';
+    setCameraFacing(nextFacing);
+
+    if (isRecording === 'video' && activeStream.current) {
+      try {
+        const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: nextFacing, width: 400, height: 400 } });
+        const newVideoTrack = newStream.getVideoTracks()[0];
+        const oldVideoTrack = activeStream.current.getVideoTracks()[0];
+
+        if (oldVideoTrack) {
+          activeStream.current.removeTrack(oldVideoTrack);
+          oldVideoTrack.stop();
+        }
+        activeStream.current.addTrack(newVideoTrack);
+
+        if (videoPreviewRef.current) {
+          videoPreviewRef.current.srcObject = activeStream.current;
+        }
+      } catch (err) { console.error("Ошибка переворота камеры", err); }
+    }
+  };
+
+  const handlePointerDown = (e) => {
+    isHolding.current = false;
+    setIsLocked(false);
+    startY.current = e.clientY;
+    startX.current = e.clientX;
+    pressTimer.current = setTimeout(() => {
+      isHolding.current = true;
+      startMediaRecording(mode);
+    }, 300);
+  };
+
+  const handlePointerMove = (e) => {
+    if (isHolding.current && !isLocked) {
+      if (startY.current - e.clientY > 50) {
+        setIsLocked(true);
+      } else if (startX.current - e.clientX > 60) {
+        cancelMediaRecording();
+      }
+    }
+  };
+
+  const handlePointerUp = (e) => {
+    clearTimeout(pressTimer.current);
+    if (isLocked && isRecording) return;
+
+    if (isHolding.current) {
+      stopMediaRecording();
+    } else {
+      if (!isRecording) setMode(prev => prev === 'voice' ? 'video' : 'voice');
+    }
+    isHolding.current = false;
+  };
+
+  // --- 🛑 ГРАНИЦА АВТОРИЗАЦИИ 🛑 ---
+  // Рендерим Логин Экран СРАЗУ, если user равен null.
+  // Это предотвращает фатальные краши при обращении к user.username в фоновых процессах.
+  if (!user) return (
+      <div className="app-container">
+        <style>{auraStyles(isDark)}</style>
+        <div style={{width: '100%', maxWidth: 400, padding: 30, background: 'var(--card-bg)', borderRadius: 24, alignSelf: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.2)', animation: 'popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'}}>
+          {globalError && <div className="error-toast">{globalError}</div>}
+          <div className="akashi-logo">
+            <div className="akashi-glow"></div>
+            <svg viewBox="0 0 100 100" style={{width: 60, height: 60, position: 'relative', zIndex: 10, filter: 'drop-shadow(0 0 8px rgba(255,0,0,1))'}} fill="none">
+              <path d="M5 50 Q 50 15 95 50 Q 50 85 5 50 Z" stroke="#ef4444" strokeWidth="3" strokeOpacity="0.3" />
+              <circle cx="50" cy="50" r="20" stroke="#ef4444" strokeWidth="4" strokeOpacity="0.9" fill="rgba(239,68,68,0.1)"/>
+              <path d="M58 10 L40 52 L56 52 L38 90" stroke="#ff0000" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <h2 style={{textAlign: 'center', marginBottom: 25, fontSize: 24, fontWeight: 800}}>Вход в Aura</h2>
+          <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+            <input className="ios-input" placeholder="Логин (без пробелов)" onChange={e => setFormData({...formData, username: e.target.value})} />
+            <input className="ios-input" type="password" placeholder="Пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
+            {authStep === 'reg' && <input className="ios-input" placeholder="Ваше имя" onChange={e => setFormData({...formData, name: e.target.value})} />}
+            <button className="btn-primary" style={{marginTop: 10}} onClick={handleAuth}>{loading ? 'Загрузка...' : 'Продолжить'}</button>
+            <button style={{background: 'none', border: 'none', color: 'var(--ios-blue)', cursor: 'pointer', fontWeight: 600}} onClick={() => setAuthStep(authStep === 'reg' ? 'login' : 'reg')}>
+              {authStep === 'reg' ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Создать'}
+            </button>
+          </div>
+        </div>
+      </div>
+  );
+
+  // --- 🟢 ЗОНА БЕЗОПАСНОСТИ 🟢 ---
+  // Сюда код доходит ТОЛЬКО если пользователь 100% залогинен.
+  // Никаких 'TypeError: Cannot read properties of null (reading username)' больше не будет!
 
   const sendMessage = async (val, type = 'text', forwardedFrom = null) => {
     if (!val.trim() && type === 'text') return;
@@ -400,7 +586,6 @@ export default function App() {
     closeContextMenu();
   };
 
-  // --- ЛОГИКА ЗВОНКОВ ---
   const startCall = async (type) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: type === 'video' ? { facingMode: 'user' } : false });
@@ -528,14 +713,6 @@ export default function App() {
     setActiveCall(null); setCallDuration(0); clearInterval(callTimer.current);
   };
 
-  // --- ХЕЛПЕРЫ ---
-  const formatTime = (seconds) => { const m = Math.floor(seconds / 60); const s = seconds % 60; return `${m}:${s < 10 ? '0' : ''}${s}`; };
-
-  const formatTimeOnly = (ts) => {
-    if (!ts) return '';
-    try { return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch(e) { return ''; }
-  };
-
   const getLastMessage = (peerUsername) => {
     if (peerUsername === 'global') {
       const globalMsgs = messages.filter(m => m.to === 'global' && !(m.hiddenFor || []).includes(user.username));
@@ -557,34 +734,6 @@ export default function App() {
     if (msg.type === 'sticker') return '✨ Стикер';
     return 'Вложение';
   };
-
-  const filteredUsers = allUsers.filter(u => u.username !== user?.username).filter(u => {
-    if (!searchQuery) return true;
-    const lowerQ = searchQuery.toLowerCase().replace('@', '').trim();
-    return (u.name || '').toLowerCase().includes(lowerQ) || (u.username || '').toLowerCase().includes(lowerQ);
-  });
-
-  const sortedUsers = [...filteredUsers].sort((a, b) => {
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase().replace('@', '').trim();
-      const aExact = a.username?.toLowerCase() === q || a.name?.toLowerCase() === q;
-      const bExact = b.username?.toLowerCase() === q || b.name?.toLowerCase() === q;
-      if (aExact && !bExact) return -1;
-      if (!aExact && bExact) return 1;
-
-      const aStarts = a.username?.toLowerCase().startsWith(q) || a.name?.toLowerCase().startsWith(q);
-      const bStarts = b.username?.toLowerCase().startsWith(q) || b.name?.toLowerCase().startsWith(q);
-      if (aStarts && !bStarts) return -1;
-      if (!aStarts && bStarts) return 1;
-    }
-
-    const aPin = user?.pinnedChats?.includes(a.username); const bPin = user?.pinnedChats?.includes(b.username);
-    if (aPin && !bPin) return -1; if (!aPin && bPin) return 1;
-    const timeA = getLastMessage(a.username)?.ts || 0; const timeB = getLastMessage(b.username)?.ts || 0;
-    return timeB - timeA;
-  });
-
-  const myCallLogs = callLogs.filter(l => l.caller === user.username || l.callee === user.username);
 
   const togglePinMessage = async () => {
     if (!contextMenu || contextMenu.type !== 'message') return;
@@ -608,134 +757,34 @@ export default function App() {
     closeContextMenu();
   };
 
-  // --- ЛОГИКА ЗАПИСИ (ОБНОВЛЕННАЯ С ПАУЗОЙ И ОТМЕНОЙ СВАЙПОМ) ---
-  const startMediaRecording = async (type) => {
-    try {
-      const constraints = { audio: true, video: type === 'video' ? { facingMode: cameraFacing, width: 400, height: 400 } : false };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      activeStream.current = stream;
+  // Вычисления данных теперь 100% безопасны
+  const filteredUsers = allUsers.filter(u => u.username !== user.username).filter(u => {
+    if (!searchQuery) return true;
+    const lowerQ = searchQuery.toLowerCase().replace('@', '').trim();
+    return (u.name || '').toLowerCase().includes(lowerQ) || (u.username || '').toLowerCase().includes(lowerQ);
+  });
 
-      if (type === 'video' && videoPreviewRef.current) {
-        videoPreviewRef.current.srcObject = stream;
-      }
+  const sortedUsers = [...filteredUsers].sort((a, b) => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase().replace('@', '').trim();
+      const aExact = a.username?.toLowerCase() === q || a.name?.toLowerCase() === q;
+      const bExact = b.username?.toLowerCase() === q || b.name?.toLowerCase() === q;
+      if (aExact && !bExact) return -1;
+      if (!aExact && bExact) return 1;
 
-      const options = { mimeType: type === 'video' ? 'video/webm;codecs=vp8' : 'audio/webm' };
-      mediaRecorder.current = new MediaRecorder(stream, options);
-      audioChunks.current = [];
-
-      mediaRecorder.current.ondataavailable = e => { if (e.data.size > 0) audioChunks.current.push(e.data); };
-
-      mediaRecorder.current.onstop = () => {
-        if (mediaRecorder.current.cancelRecord) { stream.getTracks().forEach(t => t.stop()); activeStream.current = null; return; }
-        const blob = new Blob(audioChunks.current, { type: type === 'video' ? 'video/webm' : 'audio/webm' });
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          sendMessage(reader.result, type === 'video' ? 'video_circle' : 'voice');
-          stream.getTracks().forEach(t => t.stop()); activeStream.current = null;
-        };
-        reader.readAsDataURL(blob);
-      };
-
-      mediaRecorder.current.start();
-      setIsRecording(type); setRecTime(0); setIsPaused(false);
-      mediaRecorder.current.timer = setInterval(() => setRecTime(p => p + 1), 1000);
-    } catch (e) { showError("Нет доступа к камере или микрофону"); }
-  };
-
-  const stopMediaRecording = () => {
-    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
-      mediaRecorder.current.stop();
-      clearInterval(mediaRecorder.current.timer);
+      const aStarts = a.username?.toLowerCase().startsWith(q) || a.name?.toLowerCase().startsWith(q);
+      const bStarts = b.username?.toLowerCase().startsWith(q) || b.name?.toLowerCase().startsWith(q);
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
     }
-    setIsRecording(null);
-    setIsLocked(false);
-    setIsPaused(false);
-  };
 
-  const cancelMediaRecording = () => {
-    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
-      mediaRecorder.current.cancelRecord = true;
-      mediaRecorder.current.stop();
-      clearInterval(mediaRecorder.current.timer);
-    }
-    setIsRecording(null);
-    setIsLocked(false);
-    setIsPaused(false);
-    isHolding.current = false;
-  };
+    const aPin = user.pinnedChats?.includes(a.username); const bPin = user.pinnedChats?.includes(b.username);
+    if (aPin && !bPin) return -1; if (!aPin && bPin) return 1;
+    const timeA = getLastMessage(a.username)?.ts || 0; const timeB = getLastMessage(b.username)?.ts || 0;
+    return timeB - timeA;
+  });
 
-  const togglePause = () => {
-    if (mediaRecorder.current) {
-      if (mediaRecorder.current.state === 'recording') {
-        mediaRecorder.current.pause();
-        setIsPaused(true);
-        clearInterval(mediaRecorder.current.timer);
-      } else if (mediaRecorder.current.state === 'paused') {
-        mediaRecorder.current.resume();
-        setIsPaused(false);
-        mediaRecorder.current.timer = setInterval(() => setRecTime(p => p + 1), 1000);
-      }
-    }
-  };
-
-  const flipCamera = async (e) => {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
-    const nextFacing = cameraFacing === 'user' ? 'environment' : 'user';
-    setCameraFacing(nextFacing);
-
-    if (isRecording === 'video' && activeStream.current) {
-      try {
-        const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: nextFacing, width: 400, height: 400 } });
-        const newVideoTrack = newStream.getVideoTracks()[0];
-        const oldVideoTrack = activeStream.current.getVideoTracks()[0];
-
-        if (oldVideoTrack) {
-          activeStream.current.removeTrack(oldVideoTrack);
-          oldVideoTrack.stop();
-        }
-        activeStream.current.addTrack(newVideoTrack);
-
-        if (videoPreviewRef.current) {
-          videoPreviewRef.current.srcObject = activeStream.current;
-        }
-      } catch (err) {
-        console.error("Ошибка переворота камеры", err);
-      }
-    }
-  };
-
-  const handlePointerDown = (e) => {
-    isHolding.current = false;
-    setIsLocked(false);
-    startY.current = e.clientY;
-    startX.current = e.clientX;
-    pressTimer.current = setTimeout(() => {
-      isHolding.current = true;
-      startMediaRecording(mode);
-    }, 300);
-  };
-
-  const handlePointerMove = (e) => {
-    if (isHolding.current && !isLocked) {
-      if (startY.current - e.clientY > 50) {
-        setIsLocked(true); // Заблокировать (свайп вверх)
-      } else if (startX.current - e.clientX > 60) {
-        cancelMediaRecording(); // Отменить (свайп влево)
-      }
-    }
-  };
-
-  const handlePointerUp = (e) => {
-    clearTimeout(pressTimer.current);
-    if (isLocked && isRecording) return;
-
-    if (isHolding.current) {
-      stopMediaRecording();
-    } else {
-      if (!isRecording) setMode(prev => prev === 'voice' ? 'video' : 'voice');
-    }
-    isHolding.current = false;
-  };
+  const myCallLogs = callLogs.filter(l => l.caller === user.username || l.callee === user.username);
 
   const currentMessages = messages.filter(m => {
     if (!selectedPeer) return false;
@@ -744,10 +793,9 @@ export default function App() {
     return (m.uid === user.username && m.to === selectedPeer.username) || (m.uid === selectedPeer.username && m.to === user.username);
   });
 
-  // --- КОМПОНЕНТЫ СООБЩЕНИЙ ---
   const renderMessageContent = (m, isClone = false) => {
     if (m.type === 'system') return <div key={m.id} className="system-bubble" style={{ margin: isClone ? 0 : '10px 0' }}>{m.text}</div>;
-    const isMine = m.uid === user?.username;
+    const isMine = m.uid === user.username;
     const isSticker = m.type === 'sticker';
     const isImage = m.type === 'image';
     const isCircle = m.type === 'video_circle';
@@ -802,33 +850,6 @@ export default function App() {
         </div>
     );
   };
-
-  if (!user) return (
-      <div className="app-container">
-        <style>{auraStyles(isDark)}</style>
-        <div style={{width: '100%', maxWidth: 400, padding: 30, background: 'var(--card-bg)', borderRadius: 24, alignSelf: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.2)', animation: 'popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'}}>
-          {globalError && <div className="error-toast">{globalError}</div>}
-          <div className="akashi-logo">
-            <div className="akashi-glow"></div>
-            <svg viewBox="0 0 100 100" style={{width: 60, height: 60, position: 'relative', zIndex: 10, filter: 'drop-shadow(0 0 8px rgba(255,0,0,1))'}} fill="none">
-              <path d="M5 50 Q 50 15 95 50 Q 50 85 5 50 Z" stroke="#ef4444" strokeWidth="3" strokeOpacity="0.3" />
-              <circle cx="50" cy="50" r="20" stroke="#ef4444" strokeWidth="4" strokeOpacity="0.9" fill="rgba(239,68,68,0.1)"/>
-              <path d="M58 10 L40 52 L56 52 L38 90" stroke="#ff0000" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <h2 style={{textAlign: 'center', marginBottom: 25, fontSize: 24, fontWeight: 800}}>Вход в Aura</h2>
-          <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
-            <input className="ios-input" placeholder="Логин" onChange={e => setFormData({...formData, username: e.target.value})} />
-            <input className="ios-input" type="password" placeholder="Пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
-            {authStep === 'reg' && <input className="ios-input" placeholder="Ваше имя" onChange={e => setFormData({...formData, name: e.target.value})} />}
-            <button className="btn-primary" style={{marginTop: 10}} onClick={handleAuth}>{loading ? 'Загрузка...' : 'Продолжить'}</button>
-            <button style={{background: 'none', border: 'none', color: 'var(--ios-blue)', cursor: 'pointer', fontWeight: 600}} onClick={() => setAuthStep(authStep === 'reg' ? 'login' : 'reg')}>
-              {authStep === 'reg' ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Создать'}
-            </button>
-          </div>
-        </div>
-      </div>
-  );
 
   return (
       <div className="app-container">
@@ -1036,7 +1057,6 @@ export default function App() {
                   {currentMessages.map((m) => <React.Fragment key={m.id}>{renderMessageContent(m)}</React.Fragment>)}
                 </div>
 
-                {/* ОГРОМНЫЙ ОВЕРЛЕЙ ДЛЯ ВИДЕОКРУЖКА КАК В ТЕЛЕГРАММЕ */}
                 {isRecording === 'video' ? (
                     <div style={{
                       position: 'absolute', inset: 0, zIndex: 3000,
@@ -1046,7 +1066,6 @@ export default function App() {
                       animation: 'fadeIn 0.2s ease',
                       pointerEvents: isLocked ? 'auto' : 'none'
                     }}>
-                      {/* Огромное видео по центру */}
                       <div style={{
                         width: 280, height: 280, borderRadius: '50%', overflow: 'hidden',
                         border: '5px solid var(--ios-blue)', boxShadow: '0 20px 50px rgba(0,0,0,0.3)',
@@ -1058,13 +1077,11 @@ export default function App() {
                                style={{width: '100%', height: '100%', objectFit: 'cover', transform: cameraFacing === 'user' ? 'scaleX(-1)' : 'scaleX(1)'}} />
                       </div>
 
-                      {/* Таймер */}
                       <div style={{marginTop: 30, display: 'flex', alignItems: 'center', gap: 10, color: '#FF3B30', fontWeight: 'bold', fontSize: 28, textShadow: '0 2px 10px rgba(0,0,0,0.2)'}}>
                         {isPaused ? <span style={{color: 'white', opacity: 0.8, fontSize: 24}}>Пауза</span> : <div style={{width: 14, height: 14, borderRadius: '50%', background: '#FF3B30', animation: 'pulseGlow 1s infinite'}} />}
                         {formatTime(recTime)}
                       </div>
 
-                      {/* Кнопки появляются только после фиксации свайпом вверх */}
                       {isLocked ? (
                           <div style={{display: 'flex', alignItems: 'center', gap: 40, marginTop: 40, animation: 'popIn 0.3s ease'}}>
                             <button onClick={cancelMediaRecording} style={{background: '#FF3B30', color: 'white', borderRadius: '50%', width: 60, height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 5px 15px rgba(255,59,48,0.4)'}}>
@@ -1089,7 +1106,6 @@ export default function App() {
                       )}
                     </div>
                 ) : isRecording === 'voice' ? (
-                    // Обычный блок снизу для записи голоса
                     <div style={{position: 'absolute', bottom: 85, left: 0, right: 0, display: 'flex', justifyContent: 'center', zIndex: 150}}>
                       <div className="glass-panel" style={{borderRadius: 40, padding: isLocked ? '10px 20px' : '8px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '90%', maxWidth: 400, boxShadow: '0 10px 25px rgba(0,0,0,0.2)', border: '1px solid var(--sep)'}}>
 
@@ -1169,7 +1185,6 @@ export default function App() {
               </div>
           )}
 
-          {/* --- НОВОЕ КОНТЕКСТНОЕ МЕНЮ (КАК В ТГ) --- */}
           {contextMenu && (
               <div className="blur-overlay" onClick={closeContextMenu}>
                 {contextMenu.type === 'message' && (() => {
@@ -1186,19 +1201,16 @@ export default function App() {
                         maxWidth: '85vw'
                       }} onClick={e => e.stopPropagation()}>
 
-                        {/* Панель с реакциями (Сверху) */}
                         <div className="glass-panel" style={{display: 'flex', gap: 12, padding: '10px 16px', borderRadius: 30, marginBottom: 8, boxShadow: '0 10px 25px rgba(0,0,0,0.2)'}}>
                           {['❤️', '👍', '👎', '😂', '😮', '😢'].map(e => (
                               <span key={e} onClick={() => handleReaction(e)} style={{fontSize: 26, cursor: 'pointer', transition: 'transform 0.1s'}} onMouseDown={(e)=>e.target.style.transform='scale(1.2)'} onMouseUp={(e)=>e.target.style.transform='scale(1)'}>{e}</span>
                           ))}
                         </div>
 
-                        {/* Само сообщение (По центру) */}
                         <div style={{transform: 'scale(1.02)', transformOrigin: isMine ? 'right center' : 'left center', transition: 'transform 0.2s', zIndex: 2}}>
                           {renderMessageContent(contextMenu.item, true)}
                         </div>
 
-                        {/* Меню действий (Снизу) */}
                         <div className="context-menu-popup" style={{position: 'relative', marginTop: 12, left: 0, top: 0, right: 0, width: 250, zIndex: 2}}>
                           <button className="context-menu-btn" onClick={togglePinMessage}><Pin size={18} /> {contextMenu.item.isPinned ? 'Открепить' : 'Закрепить'}</button>
                           <button className="context-menu-btn" onClick={handleForwardStart}><Forward size={18} /> Переслать</button>
