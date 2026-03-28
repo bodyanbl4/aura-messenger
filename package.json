@@ -16,6 +16,7 @@
     "socket.io-client": "^4.7.4"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
     "@vitejs/plugin-react": "^4.2.1",
     "vite": "^5.1.4"
   }
