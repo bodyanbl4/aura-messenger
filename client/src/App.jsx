@@ -133,6 +133,8 @@ const auraStyles = (isDark) => `
 export default function App() {
   const [firebaseUser, setFirebaseUser] = useState(null);
   const [user, setUser] = useState(null);
+  const [isRestoring, setIsRestoring] = useState(true); // Состояние загрузки сессии (чтобы не мигал экран логина)
+
   const [isDark, setIsDark] = useState(localStorage.getItem('aura_dark') === 'true');
   const [view, setView] = useState('chats');
   const [selectedPeer, setSelectedPeer] = useState(null);
@@ -181,7 +183,7 @@ export default function App() {
   const isHolding = useRef(false);
   const lastTapRef = useRef(0);
 
-  // ИНИЦИАЛИЗАЦИЯ
+  // 1. ИНИЦИАЛИЗАЦИЯ И ПРОВЕРКА AUTH
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -196,16 +198,49 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setFirebaseUser(u);
-      if (u) {
-        const saved = localStorage.getItem('aura_user');
-        if (saved) {
-          try { setUser(JSON.parse(saved)); }
-          catch (e) { localStorage.removeItem('aura_user'); }
-        }
-      }
+      if (!u) setIsRestoring(false); // Если пользователя Firebase нет, прекращаем показ загрузки
     });
     return () => unsubscribe();
   }, []);
+
+  // 2. БЕЗОТКАЗНОЕ ВОССТАНОВЛЕНИЕ СЕССИИ ИЗ БАЗЫ ДАННЫХ
+  useEffect(() => {
+    if (!firebaseUser) return;
+
+    let mounted = true;
+    const restoreSession = async () => {
+      try {
+        // Ищем несгораемую сессию пользователя, привязанную к его Firebase ID
+        const sessionRef = doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current');
+        const sessionSnap = await getDoc(sessionRef);
+
+        if (sessionSnap.exists() && mounted) {
+          const uName = sessionSnap.data().username;
+          // Достаем полный профиль пользователя
+          const userSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', uName));
+          if (userSnap.exists() && mounted) {
+            setUser(userSnap.data());
+            localStorage.setItem('aura_user', JSON.stringify(userSnap.data()));
+          }
+        } else if (mounted) {
+          // Если сессии в базе нет, пробуем достать из локальной памяти (как запасной вариант)
+          const saved = localStorage.getItem('aura_user');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            setUser(parsed);
+            // Если достали из памяти, сразу сохраняем в базу на будущее!
+            await setDoc(sessionRef, { username: parsed.username }).catch(console.error);
+          }
+        }
+      } catch (e) {
+        console.error("Ошибка восстановления сессии", e);
+      } finally {
+        if (mounted) setIsRestoring(false); // Отключаем экран загрузки в любом случае
+      }
+    };
+
+    restoreSession();
+  }, [firebaseUser]);
 
   // ПОДГРУЗКА ДАННЫХ
   useEffect(() => {
@@ -273,17 +308,23 @@ export default function App() {
 
   const showError = (msg) => { setGlobalError(msg); setTimeout(() => setGlobalError(null), 3000); };
 
-  // 🛡 АВТОРИЗАЦИЯ И СБРОС ПАРОЛЯ
+  // 🛡 АВТОРИЗАЦИЯ СОХРАНЯЕТ СЕССИЮ В ФАЙРБЕЙЗ
   const handleAuth = async () => {
     const { username, password, name } = formData;
     if (!username || !password) return showError("Введите логин и пароль");
     setLoading(true);
 
     try {
-      const safeUsername = username.toLowerCase().replace(/\s+/g, '');
+      // ИСПРАВЛЕНИЕ: Убрали replace(/\s+/g, ''), чтобы вернуть старые аккаунты!
+      const safeUsername = username.toLowerCase().trim();
+
       if (safeUsername.length < 3) {
         setLoading(false);
-        return showError("Логин должен быть от 3 символов без пробелов");
+        return showError("Логин должен быть от 3 символов");
+      }
+      if (authStep === 'reg' && safeUsername.includes(' ')) {
+        setLoading(false);
+        return showError("Новый логин не должен содержать пробелы");
       }
 
       const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', safeUsername);
@@ -299,6 +340,8 @@ export default function App() {
           await setDoc(userRef, newUser);
           setUser(newUser);
           localStorage.setItem('aura_user', JSON.stringify(newUser));
+          // Создаем защищенную сессию
+          if (firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current'), { username: safeUsername });
 
           await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
             text: `${name || safeUsername} перешел в Aura! 🎉`, uid: 'system', to: 'global', ts: Date.now(),
@@ -307,8 +350,11 @@ export default function App() {
         }
       } else {
         if (snap.exists() && snap.data().password === password) {
-          setUser(snap.data());
-          localStorage.setItem('aura_user', JSON.stringify(snap.data()));
+          const userData = snap.data();
+          setUser(userData);
+          localStorage.setItem('aura_user', JSON.stringify(userData));
+          // Сохраняем сессию при успешном входе
+          if (firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current'), { username: userData.username });
         } else {
           showError("Неверный логин или пароль!");
         }
@@ -326,7 +372,7 @@ export default function App() {
     setLoading(true);
 
     try {
-      const safeUsername = username.toLowerCase().replace(/\s+/g, '');
+      const safeUsername = username.toLowerCase().trim();
       const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', safeUsername);
       const snap = await getDoc(userRef);
 
@@ -474,29 +520,47 @@ export default function App() {
     }
   };
 
-  // ОБНОВЛЕНО: Нажатие сразу запускает запись и фиксирует кнопки. Отмена только кнопкой.
   const handlePointerDown = (e) => {
     if (isRecording) return;
     isHolding.current = false;
     pressTimer.current = setTimeout(() => {
       isHolding.current = true;
-      setIsLocked(true); // Автоматическая фиксация UI (появляются кнопки "Корзина" и "Отправить")
+      setIsLocked(true); // Автоматическая фиксация
       startMediaRecording(mode);
-    }, 200); // Быстрый старт
+    }, 200);
   };
 
   const handlePointerUp = (e) => {
     clearTimeout(pressTimer.current);
-    if (isLocked && isRecording) return; // Если запись пошла, ничего не делаем при отпускании
+    if (isLocked && isRecording) return;
 
     if (!isHolding.current && !isRecording) {
-      // Если это был быстрый клик (не удержание)
       setMode(prev => prev === 'voice' ? 'video' : 'voice');
     }
     isHolding.current = false;
   };
 
-  // --- 🛑 ГРАНИЦА АВТОРИЗАЦИИ 🛑 ---
+  // --- 🛑 ЭКРАНЫ ЗАГРУЗКИ И АВТОРИЗАЦИИ 🛑 ---
+
+  if (isRestoring) {
+    return (
+        <div className="app-container">
+          <style>{auraStyles(isDark)}</style>
+          <div style={{width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--ios-bg)', flexDirection: 'column'}}>
+            <div className="akashi-logo" style={{transform: 'scale(0.8)', animation: 'pulseGlow 1.5s infinite'}}>
+              <div className="akashi-glow"></div>
+              <svg viewBox="0 0 100 100" style={{width: 60, height: 60, position: 'relative', zIndex: 10, filter: 'drop-shadow(0 0 8px rgba(255,0,0,1))'}} fill="none">
+                <path d="M5 50 Q 50 15 95 50 Q 50 85 5 50 Z" stroke="#ef4444" strokeWidth="3" strokeOpacity="0.3" />
+                <circle cx="50" cy="50" r="20" stroke="#ef4444" strokeWidth="4" strokeOpacity="0.9" fill="rgba(239,68,68,0.1)"/>
+                <path d="M58 10 L40 52 L56 52 L38 90" stroke="#ff0000" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <div style={{color: 'var(--text-sec)', marginTop: 20, fontWeight: 'bold', fontSize: 16}}>Загрузка Aura...</div>
+          </div>
+        </div>
+    );
+  }
+
   if (!user) return (
       <div className="app-container">
         <style>{auraStyles(isDark)}</style>
@@ -515,7 +579,7 @@ export default function App() {
 
             {authStep === 'reset' ? (
                 <>
-                  <input className="ios-input" placeholder="Логин (без пробелов)" onChange={e => setFormData({...formData, username: e.target.value})} />
+                  <input className="ios-input" placeholder="Логин" onChange={e => setFormData({...formData, username: e.target.value})} />
                   <input className="ios-input" type="password" placeholder="Новый пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
                   <button className="btn-primary" style={{marginTop: 10}} onClick={handleResetPassword}>{loading ? 'Загрузка...' : 'Сменить пароль'}</button>
                   <button style={{background: 'none', border: 'none', color: 'var(--text-sec)', cursor: 'pointer', fontWeight: 600, marginTop: 10}} onClick={() => setAuthStep('login')}>
@@ -524,7 +588,7 @@ export default function App() {
                 </>
             ) : (
                 <>
-                  <input className="ios-input" placeholder="Логин (без пробелов)" onChange={e => setFormData({...formData, username: e.target.value})} />
+                  <input className="ios-input" placeholder="Логин" onChange={e => setFormData({...formData, username: e.target.value})} />
                   <input className="ios-input" type="password" placeholder="Пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
                   {authStep === 'reg' && <input className="ios-input" placeholder="Ваше имя" onChange={e => setFormData({...formData, name: e.target.value})} />}
                   <button className="btn-primary" style={{marginTop: 10}} onClick={handleAuth}>{loading ? 'Загрузка...' : 'Продолжить'}</button>
@@ -1052,7 +1116,13 @@ export default function App() {
                     <div style={{flex: 1}}>Темная тема</div>
                     <div style={{color: 'var(--text-sec)'}}>{isDark ? 'Вкл' : 'Выкл'}</div>
                   </button>
-                  <button className="ios-item" onClick={() => { localStorage.clear(); window.location.reload(); }} style={{color: '#FF3B30'}}>
+                  <button className="ios-item" onClick={async () => {
+                    localStorage.removeItem('aura_user');
+                    if (firebaseUser) {
+                      await deleteDoc(doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current')).catch(e=>console.error(e));
+                    }
+                    window.location.reload();
+                  }} style={{color: '#FF3B30'}}>
                     <div style={{background: '#FF3B30', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 12, color: 'white'}}><LogOut size={18}/></div>
                     Выйти
                   </button>
