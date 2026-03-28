@@ -26,12 +26,16 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'aura-pro-v28';
 const app = !getApps().length ? initializeApp(envConfig) : getApps()[0];
 const auth = getAuth(app);
 const db = getFirestore(app);
-const storage = getStorage(app); // Инициализация Firebase Storage
+const storage = getStorage(app);
 
-// WebRTC STUN серверы
+// --- НАСТРОЙКИ WEBRTC (STUN + TURN СЕРВЕРЫ ДЛЯ ЗВОНКОВ ЧЕРЕЗ ЛЮБУЮ СЕТЬ) ---
 const rtcServers = {
   iceServers: [
-    { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] }
+    { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
+    // Бесплатные публичные TURN-серверы для обхода NAT (чтобы звонки работали не только по Wi-Fi)
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
   ]
 };
 
@@ -831,12 +835,10 @@ function MainApp() {
         }
 
         screenTrack.onended = () => {
-          // Если пользователь нажал "Остановить доступ" в браузере
           toggleScreenShare();
         };
         setIsScreenSharing(true);
       } else {
-        // Возврат на фронтальную камеру
         const camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
         const camTrack = camStream.getVideoTracks()[0];
 
@@ -902,6 +904,8 @@ function MainApp() {
       const callDocRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals'));
       const callId = callDocRef.id;
 
+      const candidateQueue = []; // Очередь для защиты от потери пакетов (ICE Race Condition)
+
       pc.onicecandidate = (event) => {
         if (event.candidate) {
           addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'callerCandidates'), event.candidate.toJSON());
@@ -919,20 +923,30 @@ function MainApp() {
 
       setActiveCall({ id: callId, type, peer: selectedPeer, status: 'calling', isCaller: true });
 
-      onSnapshot(callDocRef, (snapshot) => {
+      onSnapshot(callDocRef, async (snapshot) => {
         const data = snapshot.data();
         if (!data) return;
-        if (!pc.currentRemoteDescription && data.answer) {
-          pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        if (data.answer && !pc.currentRemoteDescription) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
           setActiveCall(prev => ({...prev, status: 'connected'}));
           callTimer.current = setInterval(() => setCallDuration(p => p + 1), 1000);
+
+          // Применяем накопленные кандидаты после установки удаленного описания
+          candidateQueue.forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(console.error));
         }
         if (data.status === 'ended' || data.status === 'declined') endCallLocal();
       }, (err) => console.error("Ошибка активного звонка:", err));
 
       onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'calleeCandidates'), (snapshot) => {
         snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added') pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+          if (change.type === 'added') {
+            const candidate = change.doc.data();
+            if (pc.remoteDescription) {
+              pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(console.error);
+            } else {
+              candidateQueue.push(candidate);
+            }
+          }
         });
       }, (err) => console.error("Ошибка ICE (получатель):", err));
     } catch (e) { showError("Нет доступа к камере/микрофону для звонка"); }
@@ -956,14 +970,17 @@ function MainApp() {
         if (remoteAudioRef.current && type === 'voice') remoteAudioRef.current.srcObject = event.streams[0];
       };
 
+      const callDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId);
+
+      // Сразу устанавливаем RemoteDescription перед обработкой ICE
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
       pc.onicecandidate = (event) => {
         if (event.candidate) {
           addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'calleeCandidates'), event.candidate.toJSON());
         }
       };
 
-      const callDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId);
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answerDescription = await pc.createAnswer();
       await pc.setLocalDescription(answerDescription);
 
@@ -977,7 +994,7 @@ function MainApp() {
 
       onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'callerCandidates'), (snapshot) => {
         snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added') pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+          if (change.type === 'added') pc.addIceCandidate(new RTCIceCandidate(change.doc.data())).catch(console.error);
         });
       }, (err) => console.error("Ошибка ICE (звонящий):", err));
     } catch (e) { showError("Ошибка при ответе на звонок"); }
@@ -1012,76 +1029,7 @@ function MainApp() {
     setIsMicMuted(false); setIsScreenSharing(false); setShowCallSettings(false);
   };
 
-  // --- 🛑 ЭКРАНЫ ЗАГРУЗКИ И АВТОРИЗАЦИИ 🛑 ---
-
-  if (isRestoring) {
-    return (
-        <div className="app-container">
-          <style>{auraStyles(isDark)}</style>
-          <div style={{width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--ios-bg)', flexDirection: 'column'}}>
-            <div className="akashi-logo" style={{transform: 'scale(0.8)', animation: 'pulseGlow 1.5s infinite'}}>
-              <div className="akashi-glow"></div>
-              <svg viewBox="0 0 100 100" style={{width: 60, height: 60, position: 'relative', zIndex: 10, filter: 'drop-shadow(0 0 8px rgba(255,0,0,1))'}} fill="none">
-                <path d="M5 50 Q 50 15 95 50 Q 50 85 5 50 Z" stroke="#ef4444" strokeWidth="3" strokeOpacity="0.3" />
-                <circle cx="50" cy="50" r="20" stroke="#ef4444" strokeWidth="4" strokeOpacity="0.9" fill="rgba(239,68,68,0.1)"/>
-                <path d="M58 10 L40 52 L56 52 L38 90" stroke="#ff0000" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <div style={{color: 'var(--text-sec)', marginTop: 20, fontWeight: 'bold', fontSize: 16}}>Загрузка Aura...</div>
-          </div>
-        </div>
-    );
-  }
-
-  if (!user) return (
-      <div className="app-container">
-        <style>{auraStyles(isDark)}</style>
-        <div style={{width: '100%', maxWidth: 400, padding: 30, background: 'var(--card-bg)', borderRadius: 24, alignSelf: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.2)', animation: 'popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'}}>
-          {globalError && <div className={`error-toast ${globalError.startsWith('✅') ? 'success-toast' : ''}`}>{globalError}</div>}
-          <div className="akashi-logo">
-            <div className="akashi-glow"></div>
-            <svg viewBox="0 0 100 100" style={{width: 60, height: 60, position: 'relative', zIndex: 10, filter: 'drop-shadow(0 0 8px rgba(255,0,0,1))'}} fill="none">
-              <path d="M5 50 Q 50 15 95 50 Q 50 85 5 50 Z" stroke="#ef4444" strokeWidth="3" strokeOpacity="0.3" />
-              <circle cx="50" cy="50" r="20" stroke="#ef4444" strokeWidth="4" strokeOpacity="0.9" fill="rgba(239,68,68,0.1)"/>
-              <path d="M58 10 L40 52 L56 52 L38 90" stroke="#ff0000" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <h2 style={{textAlign: 'center', marginBottom: 25, fontSize: 24, fontWeight: 800}}>Вход в Aura</h2>
-          <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
-
-            {authStep === 'reset' ? (
-                <>
-                  <input className="ios-input" placeholder="Логин" onChange={e => setFormData({...formData, username: e.target.value})} />
-                  <input className="ios-input" type="password" placeholder="Новый пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
-                  <button className="btn-primary" style={{marginTop: 10}} onClick={handleResetPassword}>{loading ? 'Загрузка...' : 'Сменить пароль'}</button>
-                  <button style={{background: 'none', border: 'none', color: 'var(--text-sec)', cursor: 'pointer', fontWeight: 600, marginTop: 10}} onClick={() => setAuthStep('login')}>
-                    Вернуться ко входу
-                  </button>
-                </>
-            ) : (
-                <>
-                  <input className="ios-input" placeholder="Логин" onChange={e => setFormData({...formData, username: e.target.value})} />
-                  <input className="ios-input" type="password" placeholder="Пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
-                  {authStep === 'reg' && <input className="ios-input" placeholder="Ваше имя" onChange={e => setFormData({...formData, name: e.target.value})} />}
-                  <button className="btn-primary" style={{marginTop: 10}} onClick={handleAuth}>{loading ? 'Загрузка...' : 'Продолжить'}</button>
-                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8}}>
-                    <button style={{background: 'none', border: 'none', color: 'var(--text-sec)', cursor: 'pointer', fontSize: 14}} onClick={() => setAuthStep('reset')}>
-                      Забыли пароль?
-                    </button>
-                    <button style={{background: 'none', border: 'none', color: 'var(--ios-blue)', cursor: 'pointer', fontWeight: 600, fontSize: 14}} onClick={() => setAuthStep(authStep === 'reg' ? 'login' : 'reg')}>
-                      {authStep === 'reg' ? 'Уже есть аккаунт?' : 'Создать аккаунт'}
-                    </button>
-                  </div>
-                </>
-            )}
-
-          </div>
-        </div>
-      </div>
-  );
-
-  // --- 🟢 ЗОНА БЕЗОПАСНОСТИ 🟢 ---
-
+  // --- КОНТЕКСТНОЕ МЕНЮ И ПРОЧЕЕ ---
   const handleReaction = async (emoji, e) => {
     if (e) { e.preventDefault(); e.stopPropagation(); }
 
@@ -1271,7 +1219,6 @@ function MainApp() {
             {m.isPinned && <Pin size={10} style={{marginRight: 2}} />}
             {formatTimeOnly(m.ts)}
 
-            {/* ГАЛОЧКИ И СТАТУС ПРОЧТЕНИЯ */}
             {isMine && selectedPeer?.username !== 'global' && (
                 <span style={{marginLeft: 4, color: m.read ? '#34C759' : 'inherit', display: 'flex', alignItems: 'center', gap: 2}}>
               {m.read ? (
@@ -1323,7 +1270,7 @@ function MainApp() {
             );
           })()}
 
-          {/* --- ЭКРАН АКТИВНОГО ЗВОНКА (ОБНОВЛЕННЫЙ) --- */}
+          {/* --- ЭКРАН АКТИВНОГО ЗВОНКА --- */}
           {activeCall && (
               <div style={{position: 'absolute', inset: 0, zIndex: 9999, background: isDark ? 'rgba(28,28,30,0.85)' : 'rgba(255,255,255,0.85)', backdropFilter: 'blur(40px)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 60, paddingBottom: 40, animation: 'fadeIn 0.3s ease'}}>
                 <audio ref={remoteAudioRef} autoPlay />
@@ -1373,24 +1320,20 @@ function MainApp() {
 
                 {/* ПАНЕЛЬ УПРАВЛЕНИЯ ЗВОНКОМ */}
                 <div style={{display: 'flex', gap: 20, marginBottom: 20, alignItems: 'center'}}>
-                  {/* Кнопка показа экрана (Только для видео) */}
                   {activeCall.type === 'video' && activeCall.status === 'connected' && (
                       <button onClick={toggleScreenShare} style={{background: isScreenSharing ? 'var(--ios-blue)' : 'var(--card-bg)', border: '1px solid var(--sep)', width: 56, height: 56, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)', transition: '0.2s'}}>
                         <MonitorUp size={24} color={isScreenSharing ? "white" : "var(--text-main)"} />
                       </button>
                   )}
 
-                  {/* Отключение микрофона */}
                   <button onClick={toggleMicCall} style={{background: isMicMuted ? 'var(--card-bg)' : 'rgba(255,255,255,0.2)', border: isMicMuted ? '1px solid var(--sep)' : 'none', backdropFilter: 'blur(10px)', width: 64, height: 64, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)', transition: '0.2s'}}>
                     {isMicMuted ? <MicOff size={28} color="var(--text-main)" /> : <Mic size={28} color="var(--text-main)" />}
                   </button>
 
-                  {/* Завершение вызова */}
                   <button onClick={endCall} style={{background: '#FF3B30', width: 76, height: 76, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(255,59,48,0.4)'}}>
                     <Phone size={36} color="white" style={{transform: 'rotate(135deg)'}} />
                   </button>
 
-                  {/* Настройки устройств */}
                   <button onClick={() => setShowCallSettings(!showCallSettings)} style={{background: showCallSettings ? 'var(--ios-blue)' : 'var(--card-bg)', border: '1px solid var(--sep)', width: 56, height: 56, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)', transition: '0.2s'}}>
                     <Settings size={24} color={showCallSettings ? "white" : "var(--text-main)"} />
                   </button>
@@ -1427,7 +1370,6 @@ function MainApp() {
                   {sortedUsers.map(u => {
                     const lastMsg = getLastMessage(u.username);
                     const isPinned = user.pinnedChats?.includes(u.username);
-                    // Если есть непрочитанные сообщения от этого пользователя
                     const unreadCount = messages.filter(m => m.uid === u.username && m.to === user.username && !m.read).length;
 
                     return (
