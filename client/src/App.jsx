@@ -95,7 +95,7 @@ const auraStyles = (isDark) => `
   
   .system-bubble { align-self: center; background: rgba(0,0,0,0.3); color: white; padding: 6px 14px; border-radius: 16px; font-size: 13px; font-weight: 500; backdrop-filter: blur(10px); margin: 10px 0; text-align: center; max-width: 90%; }
   .circle-video-wrap { width: 220px; height: 220px; border-radius: 50%; overflow: hidden; border: 3px solid ${isDark ? '#31A24C' : '#E1FFC7'}; background: #000; position: relative; cursor: pointer; flex-shrink: 0; }
-  .circle-video-wrap video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); pointer-events: none; }
+  .circle-video-wrap video { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
   .unread-dot { position: absolute; bottom: 20px; right: 20px; width: 14px; height: 14px; background: white; border-radius: 50%; box-shadow: 0 0 10px rgba(0,0,0,0.5); border: 2px solid var(--ios-blue); }
   
   .reaction-badge { position: absolute; bottom: -10px; right: -10px; background: var(--card-bg); border-radius: 12px; padding: 2px 6px; font-size: 14px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); border: 1px solid var(--sep); cursor: pointer; transition: transform 0.1s; }
@@ -130,10 +130,92 @@ const auraStyles = (isDark) => `
   .local-video-pip video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
 `;
 
+// --- ПЛЕЕР ГОЛОСОВЫХ СООБЩЕНИЙ ---
+const VoiceMessagePlayer = ({ src, isMine, isClone }) => {
+  const audioRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const updateProgress = () => setProgress((audio.currentTime / audio.duration) * 100);
+    const onEnded = () => { setIsPlaying(false); setProgress(0); };
+    audio.addEventListener('timeupdate', updateProgress);
+    audio.addEventListener('ended', onEnded);
+    return () => {
+      audio.removeEventListener('timeupdate', updateProgress);
+      audio.removeEventListener('ended', onEnded);
+    };
+  }, []);
+
+  const togglePlay = (e) => {
+    e?.stopPropagation();
+    if (isClone) return; // Нельзя проигрывать в режиме размытия (контекстном меню)
+    if (!audioRef.current) return;
+
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      audioRef.current.play().then(() => setIsPlaying(true)).catch(err => console.error("Ошибка аудио", err));
+    }
+  };
+
+  return (
+      <div style={{display: 'flex', alignItems: 'center', gap: 10, minWidth: 150}}>
+        <button onClick={togglePlay} style={{background: isMine ? 'rgba(255,255,255,0.2)' : 'var(--ios-blue)', borderRadius: '50%', padding: 8, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+          {isPlaying ? <Pause size={16} color="white" /> : <Play size={16} color="white" style={{marginLeft: 2}} />}
+        </button>
+        <div style={{flex: 1}}>
+          <audio ref={audioRef} src={src} preload="metadata" />
+          <div
+              style={{height: 4, width: '100%', background: 'rgba(0,0,0,0.2)', borderRadius: 2, cursor: 'pointer', position: 'relative'}}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isClone || !audioRef.current || !audioRef.current.duration) return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                audioRef.current.currentTime = (clickX / rect.width) * audioRef.current.duration;
+              }}
+          >
+            <div style={{height: '100%', width: `${progress || 0}%`, background: isMine ? 'white' : 'var(--ios-blue)', borderRadius: 2}}></div>
+          </div>
+          <div style={{fontSize: 11, marginTop: 4, opacity: 0.8}}>Голосовое</div>
+        </div>
+      </div>
+  );
+};
+
+// --- ПЛЕЕР ВИДЕО КРУЖКОВ ---
+const VideoCirclePlayer = ({ msg, isMine, isClone, onWatched }) => {
+  const videoRef = useRef(null);
+
+  const handleTogglePlay = (e) => {
+    e.stopPropagation();
+    if (isClone) return;
+    if (videoRef.current) {
+      if (videoRef.current.paused) {
+        videoRef.current.play().catch(err => console.error("Ошибка видео", err));
+        if (!msg.watched && !isMine) onWatched(msg.id);
+      } else {
+        videoRef.current.pause();
+      }
+    }
+  };
+
+  return (
+      <div className="circle-video-wrap" onClick={handleTogglePlay}>
+        <video ref={videoRef} src={msg.text || ''} playsInline loop={false} style={{width: '100%', height: '100%', objectFit: 'cover'}} />
+        {!isMine && !msg.watched && !isClone && <div className="unread-dot"></div>}
+      </div>
+  );
+};
+
 export default function App() {
   const [firebaseUser, setFirebaseUser] = useState(null);
   const [user, setUser] = useState(null);
-  const [isRestoring, setIsRestoring] = useState(true); // Состояние загрузки сессии (чтобы не мигал экран логина)
+  const [isRestoring, setIsRestoring] = useState(true);
 
   const [isDark, setIsDark] = useState(localStorage.getItem('aura_dark') === 'true');
   const [view, setView] = useState('chats');
@@ -145,7 +227,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [formData, setFormData] = useState({ username: '', password: '', name: '' });
   const [loading, setLoading] = useState(false);
-  const [authStep, setAuthStep] = useState('login'); // 'login', 'reg', 'reset'
+  const [authStep, setAuthStep] = useState('login');
   const [globalError, setGlobalError] = useState(null);
 
   // Состояния для записи кружков и голосовых
@@ -198,7 +280,7 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setFirebaseUser(u);
-      if (!u) setIsRestoring(false); // Если пользователя Firebase нет, прекращаем показ загрузки
+      if (!u) setIsRestoring(false);
     });
     return () => unsubscribe();
   }, []);
@@ -210,32 +292,28 @@ export default function App() {
     let mounted = true;
     const restoreSession = async () => {
       try {
-        // Ищем несгораемую сессию пользователя, привязанную к его Firebase ID
         const sessionRef = doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current');
         const sessionSnap = await getDoc(sessionRef);
 
         if (sessionSnap.exists() && mounted) {
           const uName = sessionSnap.data().username;
-          // Достаем полный профиль пользователя
           const userSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', uName));
           if (userSnap.exists() && mounted) {
             setUser(userSnap.data());
             localStorage.setItem('aura_user', JSON.stringify(userSnap.data()));
           }
         } else if (mounted) {
-          // Если сессии в базе нет, пробуем достать из локальной памяти (как запасной вариант)
           const saved = localStorage.getItem('aura_user');
           if (saved) {
             const parsed = JSON.parse(saved);
             setUser(parsed);
-            // Если достали из памяти, сразу сохраняем в базу на будущее!
             await setDoc(sessionRef, { username: parsed.username }).catch(console.error);
           }
         }
       } catch (e) {
         console.error("Ошибка восстановления сессии", e);
       } finally {
-        if (mounted) setIsRestoring(false); // Отключаем экран загрузки в любом случае
+        if (mounted) setIsRestoring(false);
       }
     };
 
@@ -308,14 +386,12 @@ export default function App() {
 
   const showError = (msg) => { setGlobalError(msg); setTimeout(() => setGlobalError(null), 3000); };
 
-  // 🛡 АВТОРИЗАЦИЯ СОХРАНЯЕТ СЕССИЮ В ФАЙРБЕЙЗ
   const handleAuth = async () => {
     const { username, password, name } = formData;
     if (!username || !password) return showError("Введите логин и пароль");
     setLoading(true);
 
     try {
-      // ИСПРАВЛЕНИЕ: Убрали replace(/\s+/g, ''), чтобы вернуть старые аккаунты!
       const safeUsername = username.toLowerCase().trim();
 
       if (safeUsername.length < 3) {
@@ -340,7 +416,6 @@ export default function App() {
           await setDoc(userRef, newUser);
           setUser(newUser);
           localStorage.setItem('aura_user', JSON.stringify(newUser));
-          // Создаем защищенную сессию
           if (firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current'), { username: safeUsername });
 
           await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
@@ -353,7 +428,6 @@ export default function App() {
           const userData = snap.data();
           setUser(userData);
           localStorage.setItem('aura_user', JSON.stringify(userData));
-          // Сохраняем сессию при успешном входе
           if (firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current'), { username: userData.username });
         } else {
           showError("Неверный логин или пароль!");
@@ -426,10 +500,24 @@ export default function App() {
     try { return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch(e) { return ''; }
   };
 
-  // --- ЛОГИКА ЗАПИСИ МЕДИА (ОТПРАВКА КНОПКАМИ) ---
+  // --- ЛОГИКА ЗАПИСИ МЕДИА ---
+
+  const getSupportedMimeType = (type) => {
+    if (type === 'video') {
+      const types = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'];
+      for (let t of types) if (MediaRecorder.isTypeSupported(t)) return t;
+      return '';
+    } else {
+      const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac'];
+      for (let t of types) if (MediaRecorder.isTypeSupported(t)) return t;
+      return '';
+    }
+  };
+
   const startMediaRecording = async (type) => {
     try {
-      const constraints = { audio: true, video: type === 'video' ? { facingMode: cameraFacing, width: 400, height: 400 } : false };
+      // Убрано жесткое ограничение ширины и высоты, чтобы задняя камера не крашилась (не выдавала черный экран)
+      const constraints = { audio: true, video: type === 'video' ? { facingMode: cameraFacing } : false };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       activeStream.current = stream;
 
@@ -437,7 +525,9 @@ export default function App() {
         videoPreviewRef.current.srcObject = stream;
       }
 
-      const options = { mimeType: type === 'video' ? 'video/webm;codecs=vp8' : 'audio/webm' };
+      const mimeType = getSupportedMimeType(type);
+      const options = mimeType ? { mimeType } : {};
+
       mediaRecorder.current = new MediaRecorder(stream, options);
       audioChunks.current = [];
 
@@ -445,7 +535,9 @@ export default function App() {
 
       mediaRecorder.current.onstop = () => {
         if (mediaRecorder.current.cancelRecord) { stream.getTracks().forEach(t => t.stop()); activeStream.current = null; return; }
-        const blob = new Blob(audioChunks.current, { type: type === 'video' ? 'video/webm' : 'audio/webm' });
+        // Используем универсальный Blob, чтобы плеер мог его прочесть
+        const fallbackType = type === 'video' ? 'video/webm' : 'audio/webm';
+        const blob = new Blob(audioChunks.current, { type: mimeType || fallbackType });
         const reader = new FileReader();
         reader.onloadend = () => {
           sendMessage(reader.result, type === 'video' ? 'video_circle' : 'voice');
@@ -457,7 +549,7 @@ export default function App() {
       mediaRecorder.current.start();
       setIsRecording(type); setRecTime(0); setIsPaused(false);
       mediaRecorder.current.timer = setInterval(() => setRecTime(p => p + 1), 1000);
-    } catch (e) { showError("Нет доступа к камере или микрофону"); }
+    } catch (e) { showError("Нет доступа к камере или микрофону"); console.error(e); }
   };
 
   const stopMediaRecording = () => {
@@ -503,7 +595,8 @@ export default function App() {
 
     if (isRecording === 'video' && activeStream.current) {
       try {
-        const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: nextFacing, width: 400, height: 400 } });
+        // Мягкий запрос камеры, без жесткого width/height
+        const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: nextFacing } });
         const newVideoTrack = newStream.getVideoTracks()[0];
         const oldVideoTrack = activeStream.current.getVideoTracks()[0];
 
@@ -514,7 +607,9 @@ export default function App() {
         activeStream.current.addTrack(newVideoTrack);
 
         if (videoPreviewRef.current) {
-          videoPreviewRef.current.srcObject = activeStream.current;
+          videoPreviewRef.current.srcObject = null; // Принудительно отвязываем
+          videoPreviewRef.current.srcObject = activeStream.current; // Привязываем новый поток
+          videoPreviewRef.current.play(); // Принудительно запускаем
         }
       } catch (err) { console.error("Ошибка переворота камеры", err); }
     }
@@ -525,7 +620,7 @@ export default function App() {
     isHolding.current = false;
     pressTimer.current = setTimeout(() => {
       isHolding.current = true;
-      setIsLocked(true); // Автоматическая фиксация
+      setIsLocked(true);
       startMediaRecording(mode);
     }, 200);
   };
@@ -904,21 +999,9 @@ export default function App() {
           {selectedPeer?.username === 'global' && !isMine && !isImage && !isSticker && !isCircle && <div style={{fontSize: 12, fontWeight: 700, marginBottom: 2, color: 'var(--ios-blue)'}}>{m.name || 'User'}</div>}
 
           {isCircle ? (
-              <div className="circle-video-wrap">
-                <video src={m.text || ''} onClick={!isClone ? (e) => { e.target.paused ? e.target.play() : e.target.pause(); if(!m.watched && !isMine) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', m.id), { watched: true }).catch(console.error); } : undefined} playsInline loop={false} />
-                {!isMine && !m.watched && !isClone && <div className="unread-dot"></div>}
-              </div>
+              <VideoCirclePlayer msg={m} isMine={isMine} isClone={isClone} onWatched={(id) => updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', id), { watched: true }).catch(console.error)} />
           ) : m.type === 'voice' ? (
-              <div style={{display: 'flex', alignItems: 'center', gap: 10, minWidth: 150}}>
-                <div style={{background: isMine ? 'rgba(255,255,255,0.2)' : 'var(--ios-blue)', borderRadius: '50%', padding: 8}}><Mic size={16} color="white" /></div>
-                <div>
-                  {!isClone && <audio src={m.text || ''} style={{display: 'none'}} id={`audio-${m.id}`} />}
-                  <div style={{height: 3, width: 80, background: 'rgba(0,0,0,0.2)', borderRadius: 2, cursor: 'pointer'}} onClick={() => { if(!isClone){ const a = document.getElementById(`audio-${m.id}`); if(a) a.play().catch(console.error); } }}>
-                    <div style={{height: '100%', width: 0, background: isMine ? 'white' : 'var(--ios-blue)'}}></div>
-                  </div>
-                  <div style={{fontSize: 11, marginTop: 4, opacity: 0.8}}>Голосовое</div>
-                </div>
-              </div>
+              <VoiceMessagePlayer src={m.text || ''} isMine={isMine} isClone={isClone} />
           ) : isImage ? (
               <img src={m.text || ''} className="attachment-img" alt="вложение" />
           ) : isSticker ? (
