@@ -31,12 +31,22 @@ const storage = getStorage(app);
 // --- НАСТРОЙКИ WEBRTC (STUN + TURN СЕРВЕРЫ ДЛЯ ЗВОНКОВ ЧЕРЕЗ ЛЮБУЮ СЕТЬ) ---
 const rtcServers = {
   iceServers: [
-    { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
-    // Бесплатные публичные TURN-серверы для обхода NAT
+    {
+      urls: [
+        'stun:stun.l.google.com:19302',
+        'stun:stun1.l.google.com:19302',
+        'stun:stun2.l.google.com:19302',
+        'stun:stun3.l.google.com:19302',
+        'stun:stun4.l.google.com:19302',
+        'stun:global.stun.twilio.com:3478'
+      ]
+    },
+    // Бесплатные публичные TURN-серверы для обхода жестких NAT (мобильный интернет)
     { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
     { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
     { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
-  ]
+  ],
+  iceCandidatePoolSize: 10 // Моментальный сбор кандидатов маршрутизации
 };
 
 // Анимированные стикеры
