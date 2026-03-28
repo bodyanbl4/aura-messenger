@@ -7,7 +7,7 @@ import {
   Search, MessageCircle, ChevronLeft, Send, User as UserIcon, LogOut, Moon,
   Camera, ChevronRight, Globe, Edit3, Mic, Check, CheckCheck, Paperclip,
   Trash, Trash2, Pin, Smile, Forward, Phone, Video, X, PhoneMissed, PhoneIncoming,
-  RefreshCw, Lock, Pause, Play, MonitorUp, MicOff, Settings
+  RefreshCw, Lock, Pause, Play, MonitorUp, MicOff, Settings, ShieldAlert
 } from 'lucide-react';
 
 // --- 🔑 КОНФИГУРАЦИЯ FIREBASE ---
@@ -41,15 +41,13 @@ const rtcServers = {
         'stun:global.stun.twilio.com:3478'
       ]
     },
-    // Бесплатные публичные TURN-серверы для обхода жестких NAT (мобильный интернет)
     { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
     { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
     { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
   ],
-  iceCandidatePoolSize: 10 // Моментальный сбор кандидатов маршрутизации
+  iceCandidatePoolSize: 10
 };
 
-// Анимированные стикеры
 const ANIMATED_STICKERS = [
   'https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.gif',
   'https://fonts.gstatic.com/s/e/notoemoji/latest/2764_fe0f/512.gif',
@@ -362,7 +360,30 @@ function MainApp() {
   const isHolding = useRef(false);
   const lastTapRef = useRef(0);
 
-  // 1. ИНИЦИАЛИЗАЦИЯ И ПРОВЕРКА AUTH
+  // 1. ИНИЦИАЛИЗАЦИЯ PWA (ПОЗВОЛЯЕТ СКАЧАТЬ ПРИЛОЖЕНИЕ КАК ПРОГРАММУ)
+  useEffect(() => {
+    const manifest = {
+      name: "Aura Messenger",
+      short_name: "Aura",
+      start_url: ".",
+      display: "standalone",
+      background_color: isDark ? "#000000" : "#F2F2F7",
+      theme_color: "#007AFF",
+      icons: [{ src: "https://api.dicebear.com/7.x/avataaars/svg?seed=Aura&backgroundColor=007AFF", sizes: "192x192", type: "image/svg+xml" }]
+    };
+    const blob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
+    const manifestURL = URL.createObjectURL(blob);
+    let manifestLink = document.getElementById('aura-manifest');
+    if (!manifestLink) {
+      manifestLink = document.createElement('link');
+      manifestLink.id = 'aura-manifest';
+      manifestLink.rel = 'manifest';
+      document.head.appendChild(manifestLink);
+    }
+    manifestLink.href = manifestURL;
+  }, [isDark]);
+
+  // 2. ИНИЦИАЛИЗАЦИЯ И ПРОВЕРКА AUTH
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -382,7 +403,7 @@ function MainApp() {
     return () => unsubscribe();
   }, []);
 
-  // 2. МНОГОУРОВНЕВОЕ ВОССТАНОВЛЕНИЕ СЕССИИ
+  // 3. МНОГОУРОВНЕВОЕ ВОССТАНОВЛЕНИЕ СЕССИИ
   useEffect(() => {
     if (!firebaseUser) return;
 
@@ -496,7 +517,7 @@ function MainApp() {
         if (scrollRef.current) {
           scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
-      }, 100); // Небольшая задержка для рендера картинок и видео
+      }, 100);
       return () => clearTimeout(timer);
     }
   }, [messages, view, selectedPeer]);
@@ -576,7 +597,7 @@ function MainApp() {
         else {
           const newUser = {
             username: safeUsername, password, name: name || safeUsername,
-            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${safeUsername}`, privacy: 'online', pinnedChats: []
+            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${safeUsername}`, privacy: 'online', pinnedChats: [], role: 'user'
           };
           await setDoc(userRef, newUser);
           setUser(newUser);
@@ -620,7 +641,7 @@ function MainApp() {
     setLoading(true);
 
     try {
-      const safeUsername = username.toLowerCase().trim(); // Также возвращаем toLowerCase
+      const safeUsername = username.toLowerCase().trim();
       const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', safeUsername);
       const snap = await getDoc(userRef);
 
@@ -1114,15 +1135,20 @@ function MainApp() {
 
   const closeContextMenu = () => setContextMenu(null);
 
+  // 🛡 УДАЛЕНИЕ СООБЩЕНИЙ С ПРОВЕРКОЙ ПРАВ АДМИНА
   const deleteMessage = async (deleteType, e) => {
     if (e) { e.preventDefault(); e.stopPropagation(); }
-
     if (!contextMenu || contextMenu.type !== 'message') return;
+
     const msgId = contextMenu.item.id;
     const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId);
+
     try {
       if (deleteType === 'both') {
-        await deleteDoc(msgRef);
+        // Если это мое сообщение ИЛИ я администратор
+        if (contextMenu.item.uid === user.username || user.role === 'admin') {
+          await deleteDoc(msgRef);
+        }
       } else {
         const currentHidden = contextMenu.item.hiddenFor || [];
         await updateDoc(msgRef, { hiddenFor: [...currentHidden, user.username] });
@@ -1219,6 +1245,7 @@ function MainApp() {
     const isSticker = m.type === 'sticker';
     const isImage = m.type === 'image';
     const isCircle = m.type === 'video_circle';
+    const isAdmin = user?.role === 'admin';
 
     let contentStyle = { padding: isImage || isSticker || isCircle ? 0 : '8px 12px', background: isImage || isSticker || isCircle ? 'transparent' : '', boxShadow: isImage || isSticker || isCircle ? 'none' : '' };
     if (isClone) contentStyle.margin = 0;
@@ -1241,7 +1268,7 @@ function MainApp() {
                 padding: (isImage || isSticker || isCircle) ? '4px 8px' : 0,
                 borderRadius: 10, display: 'inline-block', position: 'relative', zIndex: 10
               }}>
-                {m.name || 'User'}
+                {m.name || 'User'} {isAdmin && <span style={{opacity: 0.5, marginLeft: 5}}>@{m.uid}</span>}
               </div>
           )}
 
@@ -1505,6 +1532,20 @@ function MainApp() {
                     <div style={{flex: 1}}>Темная тема</div>
                     <div style={{color: 'var(--text-sec)'}}>{isDark ? 'Вкл' : 'Выкл'}</div>
                   </button>
+
+                  {/* ПАНЕЛЬ АДМИНИСТРАТОРА (УПРАВЛЕНИЕ ОБЛАКОМ ИЗ ПРИЛОЖЕНИЯ) */}
+                  {user.role !== 'admin' ? (
+                      <button className="ios-item" onClick={() => updateProfile({ role: 'admin' })}>
+                        <div style={{background: '#FF9500', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 12, color: 'white'}}><ShieldAlert size={18}/></div>
+                        <div style={{flex: 1, color: '#FF9500', fontWeight: 'bold'}}>Получить права Админа</div>
+                      </button>
+                  ) : (
+                      <div className="ios-item" style={{cursor: 'default'}}>
+                        <div style={{background: '#34C759', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 12, color: 'white'}}><ShieldAlert size={18}/></div>
+                        <div style={{flex: 1, color: '#34C759', fontWeight: 'bold'}}>⭐ Права Админа активны</div>
+                      </div>
+                  )}
+
                   <button className="ios-item" onClick={async () => {
                     localStorage.removeItem('aura_user');
                     localStorage.removeItem('aura_creds');
@@ -1661,6 +1702,8 @@ function MainApp() {
               <div className="blur-overlay" onClick={closeContextMenu}>
                 {contextMenu.type === 'message' && (() => {
                   const isMine = contextMenu.item.uid === user.username;
+                  const isAdmin = user.role === 'admin';
+
                   return (
                       <div style={{
                         position: 'absolute',
@@ -1686,8 +1729,15 @@ function MainApp() {
                         <div className="context-menu-popup" style={{position: 'relative', marginTop: 12, left: 0, top: 0, right: 0, width: 250, zIndex: 2}}>
                           <button className="context-menu-btn" onClick={togglePinMessage}><Pin size={18} /> {contextMenu.item.isPinned ? 'Открепить' : 'Закрепить'}</button>
                           <button className="context-menu-btn" onClick={handleForwardStart}><Forward size={18} /> Переслать</button>
+
                           <button className="context-menu-btn danger" onClick={(e) => deleteMessage('me', e)}><Trash size={18} /> Удалить у себя</button>
-                          {isMine && <button className="context-menu-btn danger" onClick={(e) => deleteMessage('both', e)} style={{borderBottom: 'none'}}><Trash2 size={18} /> Удалить у всех</button>}
+
+                          {/* АДМИН ИЛИ ВЛАДЕЛЕЦ МОЖЕТ УДАЛИТЬ У ВСЕХ */}
+                          {(isMine || isAdmin) && (
+                              <button className="context-menu-btn danger" onClick={(e) => deleteMessage('both', e)} style={{borderBottom: 'none'}}>
+                                <Trash2 size={18} /> {isAdmin && !isMine ? 'Удалить как Админ' : 'Удалить у всех'}
+                              </button>
+                          )}
                         </div>
 
                       </div>
