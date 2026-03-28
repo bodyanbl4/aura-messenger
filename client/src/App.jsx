@@ -89,7 +89,7 @@ const auraStyles = (isDark) => `
   
   .chat-scroll { flex: 1; overflow-y: auto; padding: 12px 16px 100px; display: flex; flex-direction: column; gap: 8px; background: ${isDark ? '#000' : '#E6EBF0'}; background-image: ${isDark ? 'none' : "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')"}; background-attachment: fixed; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
   
-  .chat-bubble { max-width: 80%; width: fit-content; padding: 8px 12px; border-radius: 18px; font-size: 16px; position: relative; word-wrap: break-word; line-height: 1.3; animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-shadow: 0 1px 2px rgba(0,0,0,0.1); user-select: none; }
+  .chat-bubble { max-width: 80%; width: fit-content; padding: 8px 12px; border-radius: 18px; font-size: 16px; position: relative; word-wrap: break-word; line-height: 1.3; animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-shadow: 0 1px 2px rgba(0,0,0,0.1); user-select: none; display: flex; flex-direction: column; }
   .bubble-me { background: var(--bubble-me); color: var(--bubble-me-text); align-self: flex-end; border-bottom-right-radius: 4px; }
   .bubble-other { background: var(--card-bg); color: var(--text-main); align-self: flex-start; border-bottom-left-radius: 4px; }
   
@@ -98,7 +98,7 @@ const auraStyles = (isDark) => `
   .circle-video-wrap video { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
   .unread-dot { position: absolute; bottom: 20px; right: 20px; width: 14px; height: 14px; background: white; border-radius: 50%; box-shadow: 0 0 10px rgba(0,0,0,0.5); border: 2px solid var(--ios-blue); }
   
-  .reaction-badge { position: absolute; bottom: -10px; right: -10px; background: var(--card-bg); border-radius: 12px; padding: 2px 6px; font-size: 14px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); border: 1px solid var(--sep); cursor: pointer; transition: transform 0.1s; }
+  .reaction-badge { position: absolute; bottom: -10px; right: -10px; background: var(--card-bg); border-radius: 12px; padding: 2px 6px; font-size: 14px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); border: 1px solid var(--sep); cursor: pointer; transition: transform 0.1s; z-index: 15; }
   .reaction-badge:active { transform: scale(0.9); }
   
   .sticker-img-3d { 
@@ -187,9 +187,24 @@ const VoiceMessagePlayer = ({ src, isMine, isClone }) => {
   );
 };
 
-// --- ПЛЕЕР ВИДЕО КРУЖКОВ ---
+// --- ПЛЕЕР ВИДЕО КРУЖКОВ (С фиксом черного экрана iOS) ---
 const VideoCirclePlayer = ({ msg, isMine, isClone, onWatched }) => {
   const videoRef = useRef(null);
+  const [videoUrl, setVideoUrl] = useState('');
+
+  useEffect(() => {
+    // Преобразуем base64 строку в надежный Blob URL для защиты от черных экранов в мобильных браузерах
+    if (msg.text && msg.text.startsWith('data:')) {
+      fetch(msg.text)
+          .then(res => res.blob())
+          .then(blob => {
+            setVideoUrl(URL.createObjectURL(blob));
+          })
+          .catch(err => console.error("Ошибка генерации Blob", err));
+    } else {
+      setVideoUrl(msg.text);
+    }
+  }, [msg.text]);
 
   const handleTogglePlay = (e) => {
     e.stopPropagation();
@@ -206,7 +221,8 @@ const VideoCirclePlayer = ({ msg, isMine, isClone, onWatched }) => {
 
   return (
       <div className="circle-video-wrap" onClick={handleTogglePlay}>
-        <video ref={videoRef} src={msg.text || ''} playsInline loop={false} style={{width: '100%', height: '100%', objectFit: 'cover'}} />
+        {/* Использование playsInline крайне важно для iOS, иначе видео не заиграет */}
+        <video ref={videoRef} src={videoUrl} playsInline loop={false} preload="metadata" style={{width: '100%', height: '100%', objectFit: 'cover'}} />
         {!isMine && !msg.watched && !isClone && <div className="unread-dot"></div>}
       </div>
   );
@@ -283,14 +299,13 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. МНОГОУРОВНЕВОЕ ВОССТАНОВЛЕНИЕ СЕССИИ (FIREBASE + LOCALSTORAGE + COOKIES)
+  // 2. МНОГОУРОВНЕВОЕ ВОССТАНОВЛЕНИЕ СЕССИИ
   useEffect(() => {
     if (!firebaseUser) return;
 
     let mounted = true;
     const restoreSession = async () => {
       try {
-        // УРОВЕНЬ 1: Проверка сессии привязанной к уникальному Firebase UID
         const sessionRef = doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current');
         const sessionSnap = await getDoc(sessionRef);
 
@@ -300,23 +315,21 @@ export default function App() {
           if (userSnap.exists() && mounted) {
             setUser(userSnap.data());
             localStorage.setItem('aura_user', JSON.stringify(userSnap.data()));
-            return; // Успех
+            return;
           }
         }
 
-        // УРОВЕНЬ 2: Проверка защищенных креденшелов в LocalStorage (выживает при смене Firebase UID)
         const savedCreds = localStorage.getItem('aura_creds');
         if (savedCreds && mounted) {
           const { username, password } = JSON.parse(savedCreds);
           const userSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', username));
           if (userSnap.exists() && userSnap.data().password === password) {
             setUser(userSnap.data());
-            await setDoc(sessionRef, { username }).catch(console.error); // Перепривязываем сессию
-            return; // Успех
+            await setDoc(sessionRef, { username }).catch(console.error);
+            return;
           }
         }
 
-        // УРОВЕНЬ 3: Cookie (самый надежный вариант, выживает даже при строгих ограничениях iframe)
         const cookies = document.cookie.split(';');
         let cUser = null, cPass = null;
         for (let c of cookies) {
@@ -329,11 +342,10 @@ export default function App() {
           if (userSnap.exists() && userSnap.data().password === cPass) {
             setUser(userSnap.data());
             await setDoc(sessionRef, { username: cUser }).catch(console.error);
-            return; // Успех
+            return;
           }
         }
 
-        // УРОВЕНЬ 4: Обычный запасной LocalStorage fallback
         const savedOld = localStorage.getItem('aura_user');
         if (savedOld && mounted) {
           const parsed = JSON.parse(savedOld);
@@ -417,7 +429,6 @@ export default function App() {
 
   const showError = (msg) => { setGlobalError(msg); setTimeout(() => setGlobalError(null), 3000); };
 
-  // 🛡 СОХРАНЕНИЕ МНОГОУРОВНЕВОЙ СЕССИИ ПРИ ВХОДЕ
   const handleAuth = async () => {
     const { username, password, name } = formData;
     if (!username || !password) return showError("Введите логин и пароль");
@@ -448,7 +459,6 @@ export default function App() {
           await setDoc(userRef, newUser);
           setUser(newUser);
 
-          // Сохраняем во все возможные хранилища для надежности
           localStorage.setItem('aura_user', JSON.stringify(newUser));
           localStorage.setItem('aura_creds', JSON.stringify({ username: safeUsername, password }));
           document.cookie = `aura_username=${safeUsername}; max-age=31536000; path=/`;
@@ -465,7 +475,6 @@ export default function App() {
           const userData = snap.data();
           setUser(userData);
 
-          // Сохраняем во все возможные хранилища для надежности
           localStorage.setItem('aura_user', JSON.stringify(userData));
           localStorage.setItem('aura_creds', JSON.stringify({ username: userData.username, password }));
           document.cookie = `aura_username=${userData.username}; max-age=31536000; path=/`;
@@ -559,16 +568,21 @@ export default function App() {
 
   const startMediaRecording = async (type) => {
     try {
-      const constraints = { audio: true, video: type === 'video' ? { facingMode: cameraFacing } : false };
+      // Оптимизируем качество, чтобы видео не превышало лимит Firestore (1MB)
+      const constraints = {
+        audio: true,
+        video: type === 'video' ? { facingMode: cameraFacing, width: { ideal: 240 }, height: { ideal: 240 } } : false
+      };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       activeStream.current = stream;
 
       if (type === 'video' && videoPreviewRef.current) {
         videoPreviewRef.current.srcObject = stream;
+        videoPreviewRef.current.play().catch(e => console.log(e));
       }
 
       const mimeType = getSupportedMimeType(type);
-      const options = mimeType ? { mimeType } : {};
+      const options = mimeType ? { mimeType, videoBitsPerSecond: 250000 } : { videoBitsPerSecond: 250000 };
 
       mediaRecorder.current = new MediaRecorder(stream, options);
       audioChunks.current = [];
@@ -589,7 +603,17 @@ export default function App() {
 
       mediaRecorder.current.start();
       setIsRecording(type); setRecTime(0); setIsPaused(false);
-      mediaRecorder.current.timer = setInterval(() => setRecTime(p => p + 1), 1000);
+
+      mediaRecorder.current.timer = setInterval(() => {
+        setRecTime(p => {
+          if (p >= 14) {
+            // 15 Секунд — жесткий лимит, иначе кружок крашнет базу из-за превышения размера (1MB)
+            stopMediaRecording();
+            return p;
+          }
+          return p + 1;
+        });
+      }, 1000);
     } catch (e) { showError("Нет доступа к камере или микрофону"); console.error(e); }
   };
 
@@ -649,7 +673,7 @@ export default function App() {
         if (videoPreviewRef.current) {
           videoPreviewRef.current.srcObject = null;
           videoPreviewRef.current.srcObject = activeStream.current;
-          videoPreviewRef.current.play();
+          videoPreviewRef.current.play().catch(e => console.log(e));
         }
       } catch (err) { console.error("Ошибка переворота камеры", err); }
     }
@@ -758,16 +782,21 @@ export default function App() {
     } catch (e) { showError("Ошибка отправки."); }
   };
 
-  const handleReaction = async (emoji) => {
+  const handleReaction = async (emoji, e) => {
+    // ВАЖНО: Останавливаем всплытие, чтобы меню не закрывалось криво
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+
     if (!contextMenu || contextMenu.type !== 'message') return;
     const msg = contextMenu.item;
     const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'messages', msg.id);
     const currentReactions = { ...(msg.reactions || {}) };
+
     if (currentReactions[user.username] === emoji) {
       delete currentReactions[user.username];
     } else {
       currentReactions[user.username] = emoji;
     }
+
     await updateDoc(msgRef, { reactions: currentReactions }).catch(console.error);
     closeContextMenu();
   };
@@ -796,7 +825,10 @@ export default function App() {
 
   const closeContextMenu = () => setContextMenu(null);
 
-  const deleteMessage = async (deleteType) => {
+  const deleteMessage = async (deleteType, e) => {
+    // ВАЖНО: Блокируем всплытие клика
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+
     if (!contextMenu || contextMenu.type !== 'message') return;
     const msgId = contextMenu.item.id;
     const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId);
@@ -807,7 +839,7 @@ export default function App() {
         const currentHidden = contextMenu.item.hiddenFor || [];
         await updateDoc(msgRef, { hiddenFor: [...currentHidden, user.username] });
       }
-    } catch (e) { console.error("Delete Error", e); }
+    } catch (err) { console.error("Delete Error", err); }
     closeContextMenu();
   };
 
@@ -960,13 +992,15 @@ export default function App() {
     return 'Вложение';
   };
 
-  const togglePinMessage = async () => {
+  const togglePinMessage = async (e) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
     if (!contextMenu || contextMenu.type !== 'message') return;
     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', contextMenu.item.id), { isPinned: !contextMenu.item.isPinned });
     closeContextMenu();
   };
 
-  const togglePinChat = async () => {
+  const togglePinChat = async (e) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
     if (!contextMenu || contextMenu.type !== 'chat') return;
     const peerUsername = contextMenu.item.username;
     const currentPinned = user.pinnedChats || [];
@@ -976,7 +1010,8 @@ export default function App() {
     closeContextMenu();
   };
 
-  const handleForwardStart = () => {
+  const handleForwardStart = (e) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
     setForwardMsg(contextMenu.item);
     setView('chats');
     closeContextMenu();
@@ -1036,7 +1071,19 @@ export default function App() {
              onTouchMove={!isClone ? () => clearTimeout(pressTimer.current) : undefined}
         >
           {m.forwardedFrom && <div style={{fontSize: 12, color: isMine ? 'rgba(255,255,255,0.8)' : 'var(--ios-blue)', marginBottom: 4, display: 'flex', alignItems: 'center'}}><Forward size={12} className="mr-1"/> Переслано от {m.forwardedFrom}</div>}
-          {selectedPeer?.username === 'global' && !isMine && !isImage && !isSticker && !isCircle && <div style={{fontSize: 12, fontWeight: 700, marginBottom: 2, color: 'var(--ios-blue)'}}>{m.name || 'User'}</div>}
+
+          {/* ИСПРАВЛЕНИЕ: Выводим имя отправителя ВСЕГДА для общих чатов, даже над кружками */}
+          {selectedPeer?.username === 'global' && !isMine && (
+              <div style={{
+                fontSize: 12, fontWeight: 700, marginBottom: (isCircle || isImage || isSticker) ? 4 : 2,
+                color: (isImage || isSticker || isCircle) ? '#FFF' : 'var(--ios-blue)',
+                background: (isImage || isSticker || isCircle) ? 'rgba(0,0,0,0.5)' : 'transparent',
+                padding: (isImage || isSticker || isCircle) ? '4px 8px' : 0,
+                borderRadius: 10, display: 'inline-block', position: 'relative', zIndex: 10
+              }}>
+                {m.name || 'User'}
+              </div>
+          )}
 
           {isCircle ? (
               <VideoCirclePlayer msg={m} isMine={isMine} isClone={isClone} onWatched={(id) => updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', id), { watched: true }).catch(console.error)} />
@@ -1402,7 +1449,7 @@ export default function App() {
 
                         <div className="glass-panel" style={{display: 'flex', gap: 12, padding: '10px 16px', borderRadius: 30, marginBottom: 8, boxShadow: '0 10px 25px rgba(0,0,0,0.2)'}}>
                           {['❤️', '👍', '👎', '😂', '😮', '😢'].map(e => (
-                              <span key={e} onClick={() => handleReaction(e)} style={{fontSize: 26, cursor: 'pointer', transition: 'transform 0.1s'}} onMouseDown={(e)=>e.target.style.transform='scale(1.2)'} onMouseUp={(e)=>e.target.style.transform='scale(1)'}>{e}</span>
+                              <span key={e} onClick={(ev) => handleReaction(e, ev)} style={{fontSize: 26, cursor: 'pointer', transition: 'transform 0.1s'}} onMouseDown={(e)=>e.target.style.transform='scale(1.2)'} onMouseUp={(e)=>e.target.style.transform='scale(1)'}>{e}</span>
                           ))}
                         </div>
 
@@ -1413,8 +1460,8 @@ export default function App() {
                         <div className="context-menu-popup" style={{position: 'relative', marginTop: 12, left: 0, top: 0, right: 0, width: 250, zIndex: 2}}>
                           <button className="context-menu-btn" onClick={togglePinMessage}><Pin size={18} /> {contextMenu.item.isPinned ? 'Открепить' : 'Закрепить'}</button>
                           <button className="context-menu-btn" onClick={handleForwardStart}><Forward size={18} /> Переслать</button>
-                          <button className="context-menu-btn danger" onClick={() => deleteMessage('me')}><Trash size={18} /> Удалить у себя</button>
-                          {isMine && <button className="context-menu-btn danger" onClick={() => deleteMessage('both')} style={{borderBottom: 'none'}}><Trash2 size={18} /> Удалить у всех</button>}
+                          <button className="context-menu-btn danger" onClick={(e) => deleteMessage('me', e)}><Trash size={18} /> Удалить у себя</button>
+                          {isMine && <button className="context-menu-btn danger" onClick={(e) => deleteMessage('both', e)} style={{borderBottom: 'none'}}><Trash2 size={18} /> Удалить у всех</button>}
                         </div>
 
                       </div>
