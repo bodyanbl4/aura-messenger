@@ -7,7 +7,7 @@ import {
   Search, MessageCircle, ChevronLeft, Send, User as UserIcon, LogOut, Moon,
   Camera, ChevronRight, Globe, Edit3, Mic, Check, CheckCheck, Paperclip,
   Trash, Trash2, Pin, Smile, Forward, Phone, Video, X, PhoneMissed, PhoneIncoming,
-  RefreshCw, Lock, Pause, Play
+  RefreshCw, Lock, Pause, Play, MonitorUp, MicOff, Settings
 } from 'lucide-react';
 
 // --- 🔑 КОНФИГУРАЦИЯ FIREBASE ---
@@ -128,8 +128,10 @@ const auraStyles = (isDark) => `
   .akashi-logo { width: 90px; height: 90px; background: #0a0a0a; border-radius: 24px; margin: 0 auto 25px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; box-shadow: 0 0 30px rgba(220,38,38,0.4); border: 1px solid rgba(239,68,68,0.2); }
   .akashi-glow { position: absolute; inset: 0; background: rgba(220,38,38,0.25); filter: blur(15px); border-radius: 50%; }
   .call-ring { position: absolute; inset: 0; border-radius: 50%; background: var(--ios-blue); z-index: 0; animation: callPulse 2s infinite ease-out; }
-  .local-video-pip { position: absolute; bottom: 120px; right: 20px; width: 100px; height: 140px; border-radius: 16px; overflow: hidden; box-shadow: 0 5px 20px rgba(0,0,0,0.4); border: 2px solid rgba(255,255,255,0.2); z-index: 10000; background: #000; animation: popIn 0.5s ease; }
+  .local-video-pip { position: absolute; bottom: 120px; right: 20px; width: 100px; height: 140px; border-radius: 16px; overflow: hidden; box-shadow: 0 5px 20px rgba(0,0,0,0.4); border: 2px solid rgba(255,255,255,0.2); z-index: 10000; background: #000; animation: popIn 0.5s ease; transition: all 0.3s ease; }
+  .local-video-pip.fullscreen { bottom: 0; right: 0; width: 100%; height: 100%; border-radius: 0; border: none; z-index: 9998; }
   .local-video-pip video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+  .local-video-pip.screen-share video { transform: scaleX(1); object-fit: contain; background: #000; }
 `;
 
 // --- ПЛЕЕР ГОЛОСОВЫХ СООБЩЕНИЙ ---
@@ -223,7 +225,7 @@ const VideoCirclePlayer = ({ msg, isMine, isClone, onWatched }) => {
   );
 };
 
-// 🛡 Броня от фатальных крашей (Error Boundary) - предотвращает "Черные экраны смерти"
+// 🛡 Броня от фатальных крашей (Error Boundary)
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -290,9 +292,18 @@ function MainApp() {
   const [showStickers, setShowStickers] = useState(false);
   const [forwardMsg, setForwardMsg] = useState(null);
 
+  // --- СОСТОЯНИЯ ЗВОНКА И НАСТРОЕК ---
   const [activeCall, setActiveCall] = useState(null);
   const [incomingCall, setIncomingCall] = useState(null);
   const [callDuration, setCallDuration] = useState(0);
+  const [isMicMuted, setIsMicMuted] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [showCallSettings, setShowCallSettings] = useState(false);
+
+  // Устройства
+  const [devices, setDevices] = useState({ audioInputs: [], audioOutputs: [] });
+  const [selectedMic, setSelectedMic] = useState('');
+  const [selectedSpeaker, setSelectedSpeaker] = useState('');
 
   const scrollRef = useRef();
   const fileInputRef = useRef(null);
@@ -396,7 +407,7 @@ function MainApp() {
     restoreSession();
   }, [firebaseUser]);
 
-  // ПОДГРУЗКА ДАННЫХ
+  // ПОДГРУЗКА ДАННЫХ И ОБНОВЛЕНИЕ СТАТУСА ПРОЧТЕНИЯ
   useEffect(() => {
     if (!firebaseUser) return;
 
@@ -425,6 +436,33 @@ function MainApp() {
       }
     }
   }, [allUsers, user?.username]);
+
+  // АВТОМАТИЧЕСКОЕ ПРОЧТЕНИЕ СООБЩЕНИЙ
+  useEffect(() => {
+    if (view === 'chat_room' && selectedPeer && user) {
+      const unreadMsgs = messages.filter(m => m.to === user.username && m.uid === selectedPeer.username && !m.read);
+      unreadMsgs.forEach(m => {
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', m.id), {
+          read: true,
+          readAt: Date.now()
+        }).catch(console.error);
+      });
+    }
+  }, [messages, view, selectedPeer, user]);
+
+  // СПИСОК УСТРОЙСТВ ДЛЯ ЗВОНКА
+  useEffect(() => {
+    if (activeCall) {
+      navigator.mediaDevices.enumerateDevices()
+          .then(devs => {
+            setDevices({
+              audioInputs: devs.filter(d => d.kind === 'audioinput'),
+              audioOutputs: devs.filter(d => d.kind === 'audiooutput')
+            });
+          })
+          .catch(console.error);
+    }
+  }, [activeCall]);
 
   useEffect(() => {
     if (isRecording === 'video' && videoPreviewRef.current && activeStream.current) {
@@ -468,7 +506,6 @@ function MainApp() {
     setLoading(true);
 
     try {
-      // ИСПРАВЛЕНИЕ: Убрали .toLowerCase(), чтобы вернуть старые аккаунты с большими буквами!
       const safeUsername = username.trim();
 
       if (safeUsername.length < 3) {
@@ -586,7 +623,7 @@ function MainApp() {
     try { return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch(e) { return ''; }
   };
 
-  // 🚀 ОБНОВЛЕННАЯ ФУНКЦИЯ ОТПРАВКИ
+  // --- ЛОГИКА ОТПРАВКИ И ЗАПИСИ МЕДИА ---
   const sendMessage = async (val, type = 'text', forwardedFrom = null) => {
     if (!val.trim() && type === 'text') return;
     try {
@@ -624,6 +661,18 @@ function MainApp() {
       console.error(e);
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const getSupportedMimeType = (type) => {
+    if (type === 'video') {
+      const types = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'];
+      for (let t of types) if (MediaRecorder.isTypeSupported(t)) return t;
+      return '';
+    } else {
+      const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac'];
+      for (let t of types) if (MediaRecorder.isTypeSupported(t)) return t;
+      return '';
     }
   };
 
@@ -666,7 +715,7 @@ function MainApp() {
 
       mediaRecorder.current.timer = setInterval(() => {
         setRecTime(p => {
-          if (p >= 14) {
+          if (p >= 59) {
             stopMediaRecording();
             return p;
           }
@@ -756,6 +805,211 @@ function MainApp() {
       setMode(prev => prev === 'voice' ? 'video' : 'voice');
     }
     isHolding.current = false;
+  };
+
+  // --- УПРАВЛЕНИЕ ЗВОНКАМИ И ЭКРАНОМ ---
+
+  const toggleMicCall = () => {
+    if (activeStream.current) {
+      const audioTracks = activeStream.current.getAudioTracks();
+      audioTracks.forEach(t => t.enabled = isMicMuted);
+      setIsMicMuted(!isMicMuted);
+    }
+  };
+
+  const toggleScreenShare = async () => {
+    try {
+      if (!isScreenSharing) {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const screenTrack = screenStream.getVideoTracks()[0];
+
+        const sender = peerConnection.current.getSenders().find(s => s.track?.kind === 'video');
+        if (sender) sender.replaceTrack(screenTrack);
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = screenStream;
+        }
+
+        screenTrack.onended = () => {
+          // Если пользователь нажал "Остановить доступ" в браузере
+          toggleScreenShare();
+        };
+        setIsScreenSharing(true);
+      } else {
+        // Возврат на фронтальную камеру
+        const camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+        const camTrack = camStream.getVideoTracks()[0];
+
+        const sender = peerConnection.current.getSenders().find(s => s.track?.kind === 'video');
+        if (sender) sender.replaceTrack(camTrack);
+
+        const oldTrack = activeStream.current.getVideoTracks().find(t => t.kind === 'video');
+        if (oldTrack) {
+          activeStream.current.removeTrack(oldTrack);
+          oldTrack.stop();
+        }
+        activeStream.current.addTrack(camTrack);
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = activeStream.current;
+        }
+        setIsScreenSharing(false);
+      }
+    } catch (e) {
+      console.error("Ошибка при захвате экрана", e);
+    }
+  };
+
+  const changeMic = async (deviceId) => {
+    setSelectedMic(deviceId);
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } });
+      const newTrack = newStream.getAudioTracks()[0];
+      const sender = peerConnection.current.getSenders().find(s => s.track?.kind === 'audio');
+      if (sender) sender.replaceTrack(newTrack);
+
+      const oldTrack = activeStream.current.getAudioTracks()[0];
+      if(oldTrack) { activeStream.current.removeTrack(oldTrack); oldTrack.stop(); }
+      activeStream.current.addTrack(newTrack);
+    } catch(e) { console.error(e); }
+  };
+
+  const changeSpeaker = async (deviceId) => {
+    setSelectedSpeaker(deviceId);
+    if (remoteAudioRef.current && typeof remoteAudioRef.current.setSinkId !== 'undefined') {
+      try { await remoteAudioRef.current.setSinkId(deviceId); } catch(e) { console.error("setSinkId error", e); }
+    }
+    if (callVideoRef.current && typeof callVideoRef.current.setSinkId !== 'undefined') {
+      try { await callVideoRef.current.setSinkId(deviceId); } catch(e) { console.error("setSinkId error", e); }
+    }
+  };
+
+  const startCall = async (type) => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: type === 'video' ? { facingMode: 'user' } : false });
+      activeStream.current = stream;
+      const pc = new RTCPeerConnection(rtcServers);
+      peerConnection.current = pc;
+
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+      pc.ontrack = (event) => {
+        remoteStream.current = event.streams[0];
+        if (callVideoRef.current && type === 'video') callVideoRef.current.srcObject = event.streams[0];
+        if (remoteAudioRef.current && type === 'voice') remoteAudioRef.current.srcObject = event.streams[0];
+      };
+
+      const callDocRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals'));
+      const callId = callDocRef.id;
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'callerCandidates'), event.candidate.toJSON());
+        }
+      };
+
+      const offerDescription = await pc.createOffer();
+      await pc.setLocalDescription(offerDescription);
+
+      await setDoc(callDocRef, {
+        caller: user.username, callee: selectedPeer.username, type,
+        offer: { type: offerDescription.type, sdp: offerDescription.sdp },
+        status: 'calling', ts: Date.now()
+      });
+
+      setActiveCall({ id: callId, type, peer: selectedPeer, status: 'calling', isCaller: true });
+
+      onSnapshot(callDocRef, (snapshot) => {
+        const data = snapshot.data();
+        if (!data) return;
+        if (!pc.currentRemoteDescription && data.answer) {
+          pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+          setActiveCall(prev => ({...prev, status: 'connected'}));
+          callTimer.current = setInterval(() => setCallDuration(p => p + 1), 1000);
+        }
+        if (data.status === 'ended' || data.status === 'declined') endCallLocal();
+      }, (err) => console.error("Ошибка активного звонка:", err));
+
+      onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'calleeCandidates'), (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+        });
+      }, (err) => console.error("Ошибка ICE (получатель):", err));
+    } catch (e) { showError("Нет доступа к камере/микрофону для звонка"); }
+  };
+
+  const answerCall = async () => {
+    if (!incomingCall) return;
+    const { id: callId, type, offer, peer } = incomingCall;
+    setIncomingCall(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: type === 'video' ? { facingMode: 'user' } : false });
+      activeStream.current = stream;
+      const pc = new RTCPeerConnection(rtcServers);
+      peerConnection.current = pc;
+
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+      pc.ontrack = (event) => {
+        remoteStream.current = event.streams[0];
+        if (callVideoRef.current && type === 'video') callVideoRef.current.srcObject = event.streams[0];
+        if (remoteAudioRef.current && type === 'voice') remoteAudioRef.current.srcObject = event.streams[0];
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'calleeCandidates'), event.candidate.toJSON());
+        }
+      };
+
+      const callDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId);
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answerDescription = await pc.createAnswer();
+      await pc.setLocalDescription(answerDescription);
+
+      await updateDoc(callDocRef, { answer: { type: answerDescription.type, sdp: answerDescription.sdp }, status: 'connected' });
+      setActiveCall({ id: callId, type, peer, status: 'connected', isCaller: false });
+      callTimer.current = setInterval(() => setCallDuration(p => p + 1), 1000);
+
+      onSnapshot(callDocRef, (snapshot) => {
+        if (snapshot.data()?.status === 'ended') endCallLocal();
+      }, (err) => console.error("Ошибка ответа на звонок:", err));
+
+      onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'callerCandidates'), (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+        });
+      }, (err) => console.error("Ошибка ICE (звонящий):", err));
+    } catch (e) { showError("Ошибка при ответе на звонок"); }
+  };
+
+  const declineCall = async () => {
+    if (!incomingCall) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'call_signals', incomingCall.id), { status: 'declined' });
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_logs'), {
+      caller: incomingCall.caller, callee: user.username, type: incomingCall.type, status: 'missed', ts: Date.now(), duration: 0
+    });
+    setIncomingCall(null);
+  };
+
+  const endCall = async () => {
+    if (activeCall) {
+      const status = activeCall.status === 'calling' ? 'missed' : 'ended';
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'call_signals', activeCall.id), { status: 'ended' });
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_logs'), {
+        caller: activeCall.isCaller ? user.username : activeCall.peer.username,
+        callee: activeCall.isCaller ? activeCall.peer.username : user.username,
+        type: activeCall.type, status: status, ts: Date.now(), duration: callDuration
+      });
+    }
+    endCallLocal();
+  };
+
+  const endCallLocal = () => {
+    if (peerConnection.current) { peerConnection.current.close(); peerConnection.current = null; }
+    if (activeStream.current) { activeStream.current.getTracks().forEach(t => t.stop()); activeStream.current = null; }
+    setActiveCall(null); setCallDuration(0); clearInterval(callTimer.current);
+    setIsMicMuted(false); setIsScreenSharing(false); setShowCallSettings(false);
   };
 
   // --- 🛑 ЭКРАНЫ ЗАГРУЗКИ И АВТОРИЗАЦИИ 🛑 ---
@@ -887,133 +1141,6 @@ function MainApp() {
     closeContextMenu();
   };
 
-  const startCall = async (type) => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: type === 'video' ? { facingMode: 'user' } : false });
-      activeStream.current = stream;
-      const pc = new RTCPeerConnection(rtcServers);
-      peerConnection.current = pc;
-
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-      pc.ontrack = (event) => {
-        remoteStream.current = event.streams[0];
-        if (callVideoRef.current && type === 'video') callVideoRef.current.srcObject = event.streams[0];
-        if (remoteAudioRef.current && type === 'voice') remoteAudioRef.current.srcObject = event.streams[0];
-      };
-
-      const callDocRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals'));
-      const callId = callDocRef.id;
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'callerCandidates'), event.candidate.toJSON());
-        }
-      };
-
-      const offerDescription = await pc.createOffer();
-      await pc.setLocalDescription(offerDescription);
-
-      await setDoc(callDocRef, {
-        caller: user.username, callee: selectedPeer.username, type,
-        offer: { type: offerDescription.type, sdp: offerDescription.sdp },
-        status: 'calling', ts: Date.now()
-      });
-
-      setActiveCall({ id: callId, type, peer: selectedPeer, status: 'calling', isCaller: true });
-
-      onSnapshot(callDocRef, (snapshot) => {
-        const data = snapshot.data();
-        if (!data) return;
-        if (!pc.currentRemoteDescription && data.answer) {
-          pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-          setActiveCall(prev => ({...prev, status: 'connected'}));
-          callTimer.current = setInterval(() => setCallDuration(p => p + 1), 1000);
-        }
-        if (data.status === 'ended' || data.status === 'declined') endCallLocal();
-      }, (err) => console.error("Ошибка активного звонка:", err));
-
-      onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'calleeCandidates'), (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added') pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
-        });
-      }, (err) => console.error("Ошибка ICE (получатель):", err));
-    } catch (e) { showError("Нет доступа к камере/микрофону для звонка"); }
-  };
-
-  const answerCall = async () => {
-    if (!incomingCall) return;
-    const { id: callId, type, offer, peer } = incomingCall;
-    setIncomingCall(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: type === 'video' ? { facingMode: 'user' } : false });
-      activeStream.current = stream;
-      const pc = new RTCPeerConnection(rtcServers);
-      peerConnection.current = pc;
-
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-      pc.ontrack = (event) => {
-        remoteStream.current = event.streams[0];
-        if (callVideoRef.current && type === 'video') callVideoRef.current.srcObject = event.streams[0];
-        if (remoteAudioRef.current && type === 'voice') remoteAudioRef.current.srcObject = event.streams[0];
-      };
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'calleeCandidates'), event.candidate.toJSON());
-        }
-      };
-
-      const callDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId);
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      const answerDescription = await pc.createAnswer();
-      await pc.setLocalDescription(answerDescription);
-
-      await updateDoc(callDocRef, { answer: { type: answerDescription.type, sdp: answerDescription.sdp }, status: 'connected' });
-      setActiveCall({ id: callId, type, peer, status: 'connected', isCaller: false });
-      callTimer.current = setInterval(() => setCallDuration(p => p + 1), 1000);
-
-      onSnapshot(callDocRef, (snapshot) => {
-        if (snapshot.data()?.status === 'ended') endCallLocal();
-      }, (err) => console.error("Ошибка ответа на звонок:", err));
-
-      onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'callerCandidates'), (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added') pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
-        });
-      }, (err) => console.error("Ошибка ICE (звонящий):", err));
-    } catch (e) { showError("Ошибка при ответе на звонок"); }
-  };
-
-  const declineCall = async () => {
-    if (!incomingCall) return;
-    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'call_signals', incomingCall.id), { status: 'declined' });
-    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_logs'), {
-      caller: incomingCall.caller, callee: user.username, type: incomingCall.type, status: 'missed', ts: Date.now(), duration: 0
-    });
-    setIncomingCall(null);
-  };
-
-  const endCall = async () => {
-    if (activeCall) {
-      const status = activeCall.status === 'calling' ? 'missed' : 'ended';
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'call_signals', activeCall.id), { status: 'ended' });
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_logs'), {
-        caller: activeCall.isCaller ? user.username : activeCall.peer.username,
-        callee: activeCall.isCaller ? activeCall.peer.username : user.username,
-        type: activeCall.type, status: status, ts: Date.now(), duration: callDuration
-      });
-    }
-    endCallLocal();
-  };
-
-  const endCallLocal = () => {
-    if (peerConnection.current) { peerConnection.current.close(); peerConnection.current = null; }
-    if (activeStream.current) { activeStream.current.getTracks().forEach(t => t.stop()); activeStream.current = null; }
-    setActiveCall(null); setCallDuration(0); clearInterval(callTimer.current);
-  };
-
   const getLastMessage = (peerUsername) => {
     if (peerUsername === 'global') {
       const globalMsgs = messages.filter(m => m.to === 'global' && !(m.hiddenFor || []).includes(user.username));
@@ -1116,7 +1243,6 @@ function MainApp() {
         >
           {m.forwardedFrom && <div style={{fontSize: 12, color: isMine ? 'rgba(255,255,255,0.8)' : 'var(--ios-blue)', marginBottom: 4, display: 'flex', alignItems: 'center'}}><Forward size={12} className="mr-1"/> Переслано от {m.forwardedFrom}</div>}
 
-          {/* Отображение имени отправителя над контентом (теперь и для видео/фото) */}
           {selectedPeer?.username === 'global' && !isMine && (
               <div style={{
                 fontSize: 12, fontWeight: 700, marginBottom: (isCircle || isImage || isSticker) ? 4 : 2,
@@ -1144,7 +1270,15 @@ function MainApp() {
           <div style={{fontSize: 10, opacity: 0.7, textAlign: 'right', marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3, position: isImage || isSticker || isCircle ? 'absolute' : 'relative', bottom: isImage || isSticker || isCircle ? 10 : 0, right: isImage || isSticker || isCircle ? (isCircle ? 30 : 10) : 0, background: isImage || isSticker || isCircle ? 'rgba(0,0,0,0.4)' : 'none', color: isImage || isSticker || isCircle ? 'white' : 'inherit', padding: isImage || isSticker || isCircle ? '2px 8px' : 0, borderRadius: 10}}>
             {m.isPinned && <Pin size={10} style={{marginRight: 2}} />}
             {formatTimeOnly(m.ts)}
-            {isMine && (m.read ? <CheckCheck size={12} /> : <Check size={12} />)}
+
+            {/* ГАЛОЧКИ И СТАТУС ПРОЧТЕНИЯ */}
+            {isMine && selectedPeer?.username !== 'global' && (
+                <span style={{marginLeft: 4, color: m.read ? '#34C759' : 'inherit', display: 'flex', alignItems: 'center', gap: 2}}>
+              {m.read ? (
+                  <>✓✓ {m.readAt && <span style={{fontSize: 9, opacity: 0.8}}>{formatTimeOnly(m.readAt)}</span>}</>
+              ) : '✓'}
+            </span>
+            )}
           </div>
 
           {m.reactions && typeof m.reactions === 'object' && Object.keys(m.reactions).length > 0 && !isClone && (
@@ -1189,18 +1323,22 @@ function MainApp() {
             );
           })()}
 
+          {/* --- ЭКРАН АКТИВНОГО ЗВОНКА (ОБНОВЛЕННЫЙ) --- */}
           {activeCall && (
               <div style={{position: 'absolute', inset: 0, zIndex: 9999, background: isDark ? 'rgba(28,28,30,0.85)' : 'rgba(255,255,255,0.85)', backdropFilter: 'blur(40px)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 60, paddingBottom: 40, animation: 'fadeIn 0.3s ease'}}>
                 <audio ref={remoteAudioRef} autoPlay />
+
                 {activeCall.type === 'video' && activeCall.status === 'connected' && (
-                    <div className="local-video-pip">
+                    <div className={`local-video-pip ${isScreenSharing ? 'screen-share' : ''}`}>
                       <video ref={localVideoRef} autoPlay muted playsInline />
                     </div>
                 )}
+
                 <div style={{color: 'var(--text-main)', fontSize: 32, fontWeight: 'bold', textShadow: '0 2px 10px rgba(0,0,0,0.2)'}}>{activeCall.peer?.name}</div>
                 <div style={{color: 'var(--text-main)', fontSize: 18, marginTop: 8, opacity: 0.8}}>
                   {activeCall.status === 'calling' ? 'Звонок...' : `На связи ${formatTime(callDuration)}`}
                 </div>
+
                 <div style={{flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', padding: 20}}>
                   {activeCall.type === 'video' && activeCall.status === 'connected' ? (
                       <video ref={callVideoRef} autoPlay playsInline style={{width: '100%', height: '100%', objectFit: 'cover', borderRadius: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.3)', transform: 'scaleX(-1)'}} />
@@ -1211,9 +1349,50 @@ function MainApp() {
                       </div>
                   )}
                 </div>
-                <div style={{display: 'flex', gap: 40, marginBottom: 20}}>
-                  <button onClick={endCall} style={{background: '#FF3B30', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(255,59,48,0.4)'}}>
+
+                {/* МЕНЮ НАСТРОЕК ЗВУКА ВО ВРЕМЯ ЗВОНКА */}
+                {showCallSettings && (
+                    <div style={{ position: 'absolute', bottom: 120, background: 'var(--card-bg)', padding: 15, borderRadius: 16, zIndex: 10001, boxShadow: '0 10px 30px rgba(0,0,0,0.5)', width: 280, border: '1px solid var(--sep)' }}>
+                      <h4 style={{marginBottom: 10, textAlign: 'center'}}>Настройки устройств</h4>
+                      <div style={{marginBottom: 12}}>
+                        <label style={{fontSize: 12, color: 'var(--text-sec)'}}>Микрофон</label>
+                        <select value={selectedMic} onChange={e => changeMic(e.target.value)} style={{width: '100%', padding: 8, marginTop: 4, borderRadius: 8, background: 'var(--ios-bg)', color: 'var(--text-main)', border: 'none', outline: 'none'}}>
+                          {devices.audioInputs.length === 0 && <option>По умолчанию</option>}
+                          {devices.audioInputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Микрофон ' + d.deviceId.slice(0,5)}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{fontSize: 12, color: 'var(--text-sec)'}}>Динамики (Вывод звука)</label>
+                        <select value={selectedSpeaker} onChange={e => changeSpeaker(e.target.value)} style={{width: '100%', padding: 8, marginTop: 4, borderRadius: 8, background: 'var(--ios-bg)', color: 'var(--text-main)', border: 'none', outline: 'none'}}>
+                          {devices.audioOutputs.length === 0 && <option>По умолчанию</option>}
+                          {devices.audioOutputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Динамик ' + d.deviceId.slice(0,5)}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                )}
+
+                {/* ПАНЕЛЬ УПРАВЛЕНИЯ ЗВОНКОМ */}
+                <div style={{display: 'flex', gap: 20, marginBottom: 20, alignItems: 'center'}}>
+                  {/* Кнопка показа экрана (Только для видео) */}
+                  {activeCall.type === 'video' && activeCall.status === 'connected' && (
+                      <button onClick={toggleScreenShare} style={{background: isScreenSharing ? 'var(--ios-blue)' : 'var(--card-bg)', border: '1px solid var(--sep)', width: 56, height: 56, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)', transition: '0.2s'}}>
+                        <MonitorUp size={24} color={isScreenSharing ? "white" : "var(--text-main)"} />
+                      </button>
+                  )}
+
+                  {/* Отключение микрофона */}
+                  <button onClick={toggleMicCall} style={{background: isMicMuted ? 'var(--card-bg)' : 'rgba(255,255,255,0.2)', border: isMicMuted ? '1px solid var(--sep)' : 'none', backdropFilter: 'blur(10px)', width: 64, height: 64, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)', transition: '0.2s'}}>
+                    {isMicMuted ? <MicOff size={28} color="var(--text-main)" /> : <Mic size={28} color="var(--text-main)" />}
+                  </button>
+
+                  {/* Завершение вызова */}
+                  <button onClick={endCall} style={{background: '#FF3B30', width: 76, height: 76, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(255,59,48,0.4)'}}>
                     <Phone size={36} color="white" style={{transform: 'rotate(135deg)'}} />
+                  </button>
+
+                  {/* Настройки устройств */}
+                  <button onClick={() => setShowCallSettings(!showCallSettings)} style={{background: showCallSettings ? 'var(--ios-blue)' : 'var(--card-bg)', border: '1px solid var(--sep)', width: 56, height: 56, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)', transition: '0.2s'}}>
+                    <Settings size={24} color={showCallSettings ? "white" : "var(--text-main)"} />
                   </button>
                 </div>
               </div>
@@ -1248,6 +1427,9 @@ function MainApp() {
                   {sortedUsers.map(u => {
                     const lastMsg = getLastMessage(u.username);
                     const isPinned = user.pinnedChats?.includes(u.username);
+                    // Если есть непрочитанные сообщения от этого пользователя
+                    const unreadCount = messages.filter(m => m.uid === u.username && m.to === user.username && !m.read).length;
+
                     return (
                         <button key={u.username} className="ios-item"
                                 onContextMenu={(e) => openContextMenu(e, u, 'chat')}
@@ -1261,7 +1443,16 @@ function MainApp() {
                               <b style={{fontSize: 17, display: 'flex', alignItems: 'center', gap: 5}}>{u.name} {isPinned && <Pin size={14} color="var(--text-sec)" />}</b>
                               {lastMsg && <span style={{fontSize: 12, color: 'var(--text-sec)'}}>{formatTimeOnly(lastMsg.ts)}</span>}
                             </div>
-                            <div style={{fontSize: 14, color: 'var(--text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{lastMsg ? getMessagePreview(lastMsg) : `@${u.username}`}</div>
+                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                              <div style={{fontSize: 14, color: 'var(--text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1}}>
+                                {lastMsg ? getMessagePreview(lastMsg) : `@${u.username}`}
+                              </div>
+                              {unreadCount > 0 && (
+                                  <div style={{background: 'var(--ios-blue)', color: 'white', borderRadius: '10px', padding: '2px 6px', fontSize: 12, fontWeight: 'bold', marginLeft: 8}}>
+                                    {unreadCount}
+                                  </div>
+                              )}
+                            </div>
                           </div>
                           <ChevronRight size={18} color="#C6C6C8" style={{marginLeft: 10, flexShrink: 0}} />
                         </button>
