@@ -151,7 +151,7 @@ const VoiceMessagePlayer = ({ src, isMine, isClone }) => {
 
   const togglePlay = (e) => {
     e?.stopPropagation();
-    if (isClone) return; // Нельзя проигрывать в режиме размытия (контекстном меню)
+    if (isClone) return;
     if (!audioRef.current) return;
 
     if (isPlaying) {
@@ -230,7 +230,6 @@ export default function App() {
   const [authStep, setAuthStep] = useState('login');
   const [globalError, setGlobalError] = useState(null);
 
-  // Состояния для записи кружков и голосовых
   const [mode, setMode] = useState('voice');
   const [isRecording, setIsRecording] = useState(null);
   const [recTime, setRecTime] = useState(0);
@@ -242,7 +241,6 @@ export default function App() {
   const [showStickers, setShowStickers] = useState(false);
   const [forwardMsg, setForwardMsg] = useState(null);
 
-  // --- ЗВОНКИ ---
   const [activeCall, setActiveCall] = useState(null);
   const [incomingCall, setIncomingCall] = useState(null);
   const [callDuration, setCallDuration] = useState(0);
@@ -285,13 +283,14 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. БЕЗОТКАЗНОЕ ВОССТАНОВЛЕНИЕ СЕССИИ ИЗ БАЗЫ ДАННЫХ
+  // 2. МНОГОУРОВНЕВОЕ ВОССТАНОВЛЕНИЕ СЕССИИ (FIREBASE + LOCALSTORAGE + COOKIES)
   useEffect(() => {
     if (!firebaseUser) return;
 
     let mounted = true;
     const restoreSession = async () => {
       try {
+        // УРОВЕНЬ 1: Проверка сессии привязанной к уникальному Firebase UID
         const sessionRef = doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current');
         const sessionSnap = await getDoc(sessionRef);
 
@@ -301,15 +300,47 @@ export default function App() {
           if (userSnap.exists() && mounted) {
             setUser(userSnap.data());
             localStorage.setItem('aura_user', JSON.stringify(userSnap.data()));
-          }
-        } else if (mounted) {
-          const saved = localStorage.getItem('aura_user');
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            setUser(parsed);
-            await setDoc(sessionRef, { username: parsed.username }).catch(console.error);
+            return; // Успех
           }
         }
+
+        // УРОВЕНЬ 2: Проверка защищенных креденшелов в LocalStorage (выживает при смене Firebase UID)
+        const savedCreds = localStorage.getItem('aura_creds');
+        if (savedCreds && mounted) {
+          const { username, password } = JSON.parse(savedCreds);
+          const userSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', username));
+          if (userSnap.exists() && userSnap.data().password === password) {
+            setUser(userSnap.data());
+            await setDoc(sessionRef, { username }).catch(console.error); // Перепривязываем сессию
+            return; // Успех
+          }
+        }
+
+        // УРОВЕНЬ 3: Cookie (самый надежный вариант, выживает даже при строгих ограничениях iframe)
+        const cookies = document.cookie.split(';');
+        let cUser = null, cPass = null;
+        for (let c of cookies) {
+          const [k, v] = c.trim().split('=');
+          if (k === 'aura_username') cUser = v;
+          if (k === 'aura_password') cPass = v;
+        }
+        if (cUser && cPass && mounted) {
+          const userSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', cUser));
+          if (userSnap.exists() && userSnap.data().password === cPass) {
+            setUser(userSnap.data());
+            await setDoc(sessionRef, { username: cUser }).catch(console.error);
+            return; // Успех
+          }
+        }
+
+        // УРОВЕНЬ 4: Обычный запасной LocalStorage fallback
+        const savedOld = localStorage.getItem('aura_user');
+        if (savedOld && mounted) {
+          const parsed = JSON.parse(savedOld);
+          setUser(parsed);
+          await setDoc(sessionRef, { username: parsed.username }).catch(console.error);
+        }
+
       } catch (e) {
         console.error("Ошибка восстановления сессии", e);
       } finally {
@@ -386,6 +417,7 @@ export default function App() {
 
   const showError = (msg) => { setGlobalError(msg); setTimeout(() => setGlobalError(null), 3000); };
 
+  // 🛡 СОХРАНЕНИЕ МНОГОУРОВНЕВОЙ СЕССИИ ПРИ ВХОДЕ
   const handleAuth = async () => {
     const { username, password, name } = formData;
     if (!username || !password) return showError("Введите логин и пароль");
@@ -415,7 +447,12 @@ export default function App() {
           };
           await setDoc(userRef, newUser);
           setUser(newUser);
+
+          // Сохраняем во все возможные хранилища для надежности
           localStorage.setItem('aura_user', JSON.stringify(newUser));
+          localStorage.setItem('aura_creds', JSON.stringify({ username: safeUsername, password }));
+          document.cookie = `aura_username=${safeUsername}; max-age=31536000; path=/`;
+          document.cookie = `aura_password=${password}; max-age=31536000; path=/`;
           if (firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current'), { username: safeUsername });
 
           await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
@@ -427,8 +464,14 @@ export default function App() {
         if (snap.exists() && snap.data().password === password) {
           const userData = snap.data();
           setUser(userData);
+
+          // Сохраняем во все возможные хранилища для надежности
           localStorage.setItem('aura_user', JSON.stringify(userData));
+          localStorage.setItem('aura_creds', JSON.stringify({ username: userData.username, password }));
+          document.cookie = `aura_username=${userData.username}; max-age=31536000; path=/`;
+          document.cookie = `aura_password=${password}; max-age=31536000; path=/`;
           if (firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current'), { username: userData.username });
+
         } else {
           showError("Неверный логин или пароль!");
         }
@@ -516,7 +559,6 @@ export default function App() {
 
   const startMediaRecording = async (type) => {
     try {
-      // Убрано жесткое ограничение ширины и высоты, чтобы задняя камера не крашилась (не выдавала черный экран)
       const constraints = { audio: true, video: type === 'video' ? { facingMode: cameraFacing } : false };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       activeStream.current = stream;
@@ -535,7 +577,6 @@ export default function App() {
 
       mediaRecorder.current.onstop = () => {
         if (mediaRecorder.current.cancelRecord) { stream.getTracks().forEach(t => t.stop()); activeStream.current = null; return; }
-        // Используем универсальный Blob, чтобы плеер мог его прочесть
         const fallbackType = type === 'video' ? 'video/webm' : 'audio/webm';
         const blob = new Blob(audioChunks.current, { type: mimeType || fallbackType });
         const reader = new FileReader();
@@ -595,7 +636,6 @@ export default function App() {
 
     if (isRecording === 'video' && activeStream.current) {
       try {
-        // Мягкий запрос камеры, без жесткого width/height
         const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: nextFacing } });
         const newVideoTrack = newStream.getVideoTracks()[0];
         const oldVideoTrack = activeStream.current.getVideoTracks()[0];
@@ -607,9 +647,9 @@ export default function App() {
         activeStream.current.addTrack(newVideoTrack);
 
         if (videoPreviewRef.current) {
-          videoPreviewRef.current.srcObject = null; // Принудительно отвязываем
-          videoPreviewRef.current.srcObject = activeStream.current; // Привязываем новый поток
-          videoPreviewRef.current.play(); // Принудительно запускаем
+          videoPreviewRef.current.srcObject = null;
+          videoPreviewRef.current.srcObject = activeStream.current;
+          videoPreviewRef.current.play();
         }
       } catch (err) { console.error("Ошибка переворота камеры", err); }
     }
@@ -1201,6 +1241,9 @@ export default function App() {
                   </button>
                   <button className="ios-item" onClick={async () => {
                     localStorage.removeItem('aura_user');
+                    localStorage.removeItem('aura_creds');
+                    document.cookie = "aura_username=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+                    document.cookie = "aura_password=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
                     if (firebaseUser) {
                       await deleteDoc(doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current')).catch(e=>console.error(e));
                     }
