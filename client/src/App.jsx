@@ -223,11 +223,48 @@ const VideoCirclePlayer = ({ msg, isMine, isClone, onWatched }) => {
   );
 };
 
-export default function App() {
+// 🛡 Броня от фатальных крашей (Error Boundary) - предотвращает "Черные экраны смерти"
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("Критический сбой перехвачен ErrorBoundary:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', width: '100vw', background: '#000', color: '#FFF', padding: 20, textAlign: 'center', fontFamily: 'sans-serif' }}>
+            <div style={{ background: '#FF3B30', padding: 25, borderRadius: 24, maxWidth: 400, boxShadow: '0 20px 40px rgba(255,59,48,0.3)' }}>
+              <h2 style={{ marginBottom: 10, fontWeight: 800 }}>Сбой интерфейса ⚠️</h2>
+              <p style={{ fontSize: 15, opacity: 0.9, marginBottom: 20 }}>Произошла ошибка при загрузке. Возможно, повреждены данные старой сессии.</p>
+              <code style={{ display: 'block', fontSize: 12, background: 'rgba(0,0,0,0.3)', padding: 10, borderRadius: 10, marginBottom: 20, overflowX: 'auto', textAlign: 'left' }}>
+                {this.state.error?.message || "Неизвестная ошибка"}
+              </code>
+              <button onClick={() => { localStorage.clear(); window.location.reload(); }} style={{ width: '100%', padding: 16, borderRadius: 14, border: 'none', background: '#FFF', color: '#FF3B30', fontWeight: 'bold', fontSize: 16, cursor: 'pointer' }}>
+                Сбросить кэш и восстановить
+              </button>
+            </div>
+          </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ОСНОВНОЙ КОМПОНЕНТ
+function MainApp() {
   const [firebaseUser, setFirebaseUser] = useState(null);
   const [user, setUser] = useState(null);
   const [isRestoring, setIsRestoring] = useState(true);
-  const [isUploading, setIsUploading] = useState(false); // Индикатор загрузки в хранилище
+  const [isUploading, setIsUploading] = useState(false);
 
   const [isDark, setIsDark] = useState(localStorage.getItem('aura_dark') === 'true');
   const [view, setView] = useState('chats');
@@ -431,7 +468,8 @@ export default function App() {
     setLoading(true);
 
     try {
-      const safeUsername = username.toLowerCase().trim();
+      // ИСПРАВЛЕНИЕ: Убрали .toLowerCase(), чтобы вернуть старые аккаунты с большими буквами!
+      const safeUsername = username.trim();
 
       if (safeUsername.length < 3) {
         setLoading(false);
@@ -494,7 +532,7 @@ export default function App() {
     setLoading(true);
 
     try {
-      const safeUsername = username.toLowerCase().trim();
+      const safeUsername = username.trim();
       const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', safeUsername);
       const snap = await getDoc(userRef);
 
@@ -548,22 +586,20 @@ export default function App() {
     try { return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch(e) { return ''; }
   };
 
-  // 🚀 ОБНОВЛЕННАЯ ФУНКЦИЯ ОТПРАВКИ (ИСПОЛЬЗУЕТ FIREBASE STORAGE ДЛЯ БОЛЬШИХ ФАЙЛОВ)
+  // 🚀 ОБНОВЛЕННАЯ ФУНКЦИЯ ОТПРАВКИ
   const sendMessage = async (val, type = 'text', forwardedFrom = null) => {
     if (!val.trim() && type === 'text') return;
     try {
       setIsUploading(true);
       let finalVal = val;
 
-      // Если это большое медиа (фото, голос, видео), загружаем его в Cloud Storage
       if ((type === 'image' || type === 'voice' || type === 'video_circle') && val.startsWith('data:')) {
         try {
           const fileRef = ref(storage, `artifacts/${appId}/public/data/media/${user.username}_${Date.now()}_${Math.random().toString(36).substring(7)}`);
           await uploadString(fileRef, val, 'data_url');
-          finalVal = await getDownloadURL(fileRef); // Получаем легкую http ссылку вместо тяжелого base64
+          finalVal = await getDownloadURL(fileRef);
         } catch (storageErr) {
           console.warn("Storage upload failed, falling back to basic Firestore upload:", storageErr);
-          // Если Storage не настроен (правила доступа), упадет сюда. Пытаемся отправить как раньше, но с проверкой размера.
           if (val.length > 950000) {
             setIsUploading(false);
             return showError("Файл слишком большой. Разрешите загрузку в Storage (Rules).");
@@ -590,6 +626,207 @@ export default function App() {
       setIsUploading(false);
     }
   };
+
+  const startMediaRecording = async (type) => {
+    try {
+      const constraints = {
+        audio: true,
+        video: type === 'video' ? { facingMode: cameraFacing, width: { ideal: 240 }, height: { ideal: 240 } } : false
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      activeStream.current = stream;
+
+      if (type === 'video' && videoPreviewRef.current) {
+        videoPreviewRef.current.srcObject = stream;
+        videoPreviewRef.current.play().catch(e => console.log(e));
+      }
+
+      const mimeType = getSupportedMimeType(type);
+      const options = mimeType ? { mimeType, videoBitsPerSecond: 250000 } : { videoBitsPerSecond: 250000 };
+
+      mediaRecorder.current = new MediaRecorder(stream, options);
+      audioChunks.current = [];
+
+      mediaRecorder.current.ondataavailable = e => { if (e.data.size > 0) audioChunks.current.push(e.data); };
+
+      mediaRecorder.current.onstop = () => {
+        if (mediaRecorder.current.cancelRecord) { stream.getTracks().forEach(t => t.stop()); activeStream.current = null; return; }
+        const fallbackType = type === 'video' ? 'video/webm' : 'audio/webm';
+        const blob = new Blob(audioChunks.current, { type: mimeType || fallbackType });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          sendMessage(reader.result, type === 'video' ? 'video_circle' : 'voice');
+          stream.getTracks().forEach(t => t.stop()); activeStream.current = null;
+        };
+        reader.readAsDataURL(blob);
+      };
+
+      mediaRecorder.current.start();
+      setIsRecording(type); setRecTime(0); setIsPaused(false);
+
+      mediaRecorder.current.timer = setInterval(() => {
+        setRecTime(p => {
+          if (p >= 14) {
+            stopMediaRecording();
+            return p;
+          }
+          return p + 1;
+        });
+      }, 1000);
+    } catch (e) { showError("Нет доступа к камере или микрофону"); console.error(e); }
+  };
+
+  const stopMediaRecording = () => {
+    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
+      mediaRecorder.current.stop();
+      clearInterval(mediaRecorder.current.timer);
+    }
+    setIsRecording(null);
+    setIsLocked(false);
+    setIsPaused(false);
+  };
+
+  const cancelMediaRecording = () => {
+    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
+      mediaRecorder.current.cancelRecord = true;
+      mediaRecorder.current.stop();
+      clearInterval(mediaRecorder.current.timer);
+    }
+    setIsRecording(null);
+    setIsLocked(false);
+    setIsPaused(false);
+    isHolding.current = false;
+  };
+
+  const togglePause = () => {
+    if (mediaRecorder.current) {
+      if (mediaRecorder.current.state === 'recording') {
+        mediaRecorder.current.pause();
+        setIsPaused(true);
+        clearInterval(mediaRecorder.current.timer);
+      } else if (mediaRecorder.current.state === 'paused') {
+        mediaRecorder.current.resume();
+        setIsPaused(false);
+        mediaRecorder.current.timer = setInterval(() => setRecTime(p => p + 1), 1000);
+      }
+    }
+  };
+
+  const flipCamera = async (e) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    const nextFacing = cameraFacing === 'user' ? 'environment' : 'user';
+    setCameraFacing(nextFacing);
+
+    if (isRecording === 'video' && activeStream.current) {
+      try {
+        const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: nextFacing } });
+        const newVideoTrack = newStream.getVideoTracks()[0];
+        const oldVideoTrack = activeStream.current.getVideoTracks()[0];
+
+        if (oldVideoTrack) {
+          activeStream.current.removeTrack(oldVideoTrack);
+          oldVideoTrack.stop();
+        }
+        activeStream.current.addTrack(newVideoTrack);
+
+        if (videoPreviewRef.current) {
+          videoPreviewRef.current.srcObject = null;
+          videoPreviewRef.current.srcObject = activeStream.current;
+          videoPreviewRef.current.play().catch(e => console.log(e));
+        }
+      } catch (err) { console.error("Ошибка переворота камеры", err); }
+    }
+  };
+
+  const handlePointerDown = (e) => {
+    if (isRecording) return;
+    isHolding.current = false;
+    pressTimer.current = setTimeout(() => {
+      isHolding.current = true;
+      setIsLocked(true);
+      startMediaRecording(mode);
+    }, 200);
+  };
+
+  const handlePointerUp = (e) => {
+    clearTimeout(pressTimer.current);
+    if (isLocked && isRecording) return;
+
+    if (!isHolding.current && !isRecording) {
+      setMode(prev => prev === 'voice' ? 'video' : 'voice');
+    }
+    isHolding.current = false;
+  };
+
+  // --- 🛑 ЭКРАНЫ ЗАГРУЗКИ И АВТОРИЗАЦИИ 🛑 ---
+
+  if (isRestoring) {
+    return (
+        <div className="app-container">
+          <style>{auraStyles(isDark)}</style>
+          <div style={{width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--ios-bg)', flexDirection: 'column'}}>
+            <div className="akashi-logo" style={{transform: 'scale(0.8)', animation: 'pulseGlow 1.5s infinite'}}>
+              <div className="akashi-glow"></div>
+              <svg viewBox="0 0 100 100" style={{width: 60, height: 60, position: 'relative', zIndex: 10, filter: 'drop-shadow(0 0 8px rgba(255,0,0,1))'}} fill="none">
+                <path d="M5 50 Q 50 15 95 50 Q 50 85 5 50 Z" stroke="#ef4444" strokeWidth="3" strokeOpacity="0.3" />
+                <circle cx="50" cy="50" r="20" stroke="#ef4444" strokeWidth="4" strokeOpacity="0.9" fill="rgba(239,68,68,0.1)"/>
+                <path d="M58 10 L40 52 L56 52 L38 90" stroke="#ff0000" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <div style={{color: 'var(--text-sec)', marginTop: 20, fontWeight: 'bold', fontSize: 16}}>Загрузка Aura...</div>
+          </div>
+        </div>
+    );
+  }
+
+  if (!user) return (
+      <div className="app-container">
+        <style>{auraStyles(isDark)}</style>
+        <div style={{width: '100%', maxWidth: 400, padding: 30, background: 'var(--card-bg)', borderRadius: 24, alignSelf: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.2)', animation: 'popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'}}>
+          {globalError && <div className={`error-toast ${globalError.startsWith('✅') ? 'success-toast' : ''}`}>{globalError}</div>}
+          <div className="akashi-logo">
+            <div className="akashi-glow"></div>
+            <svg viewBox="0 0 100 100" style={{width: 60, height: 60, position: 'relative', zIndex: 10, filter: 'drop-shadow(0 0 8px rgba(255,0,0,1))'}} fill="none">
+              <path d="M5 50 Q 50 15 95 50 Q 50 85 5 50 Z" stroke="#ef4444" strokeWidth="3" strokeOpacity="0.3" />
+              <circle cx="50" cy="50" r="20" stroke="#ef4444" strokeWidth="4" strokeOpacity="0.9" fill="rgba(239,68,68,0.1)"/>
+              <path d="M58 10 L40 52 L56 52 L38 90" stroke="#ff0000" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <h2 style={{textAlign: 'center', marginBottom: 25, fontSize: 24, fontWeight: 800}}>Вход в Aura</h2>
+          <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+
+            {authStep === 'reset' ? (
+                <>
+                  <input className="ios-input" placeholder="Логин" onChange={e => setFormData({...formData, username: e.target.value})} />
+                  <input className="ios-input" type="password" placeholder="Новый пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
+                  <button className="btn-primary" style={{marginTop: 10}} onClick={handleResetPassword}>{loading ? 'Загрузка...' : 'Сменить пароль'}</button>
+                  <button style={{background: 'none', border: 'none', color: 'var(--text-sec)', cursor: 'pointer', fontWeight: 600, marginTop: 10}} onClick={() => setAuthStep('login')}>
+                    Вернуться ко входу
+                  </button>
+                </>
+            ) : (
+                <>
+                  <input className="ios-input" placeholder="Логин" onChange={e => setFormData({...formData, username: e.target.value})} />
+                  <input className="ios-input" type="password" placeholder="Пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
+                  {authStep === 'reg' && <input className="ios-input" placeholder="Ваше имя" onChange={e => setFormData({...formData, name: e.target.value})} />}
+                  <button className="btn-primary" style={{marginTop: 10}} onClick={handleAuth}>{loading ? 'Загрузка...' : 'Продолжить'}</button>
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8}}>
+                    <button style={{background: 'none', border: 'none', color: 'var(--text-sec)', cursor: 'pointer', fontSize: 14}} onClick={() => setAuthStep('reset')}>
+                      Забыли пароль?
+                    </button>
+                    <button style={{background: 'none', border: 'none', color: 'var(--ios-blue)', cursor: 'pointer', fontWeight: 600, fontSize: 14}} onClick={() => setAuthStep(authStep === 'reg' ? 'login' : 'reg')}>
+                      {authStep === 'reg' ? 'Уже есть аккаунт?' : 'Создать аккаунт'}
+                    </button>
+                  </div>
+                </>
+            )}
+
+          </div>
+        </div>
+      </div>
+  );
+
+  // --- 🟢 ЗОНА БЕЗОПАСНОСТИ 🟢 ---
 
   const handleReaction = async (emoji, e) => {
     if (e) { e.preventDefault(); e.stopPropagation(); }
@@ -879,6 +1116,7 @@ export default function App() {
         >
           {m.forwardedFrom && <div style={{fontSize: 12, color: isMine ? 'rgba(255,255,255,0.8)' : 'var(--ios-blue)', marginBottom: 4, display: 'flex', alignItems: 'center'}}><Forward size={12} className="mr-1"/> Переслано от {m.forwardedFrom}</div>}
 
+          {/* Отображение имени отправителя над контентом (теперь и для видео/фото) */}
           {selectedPeer?.username === 'global' && !isMine && (
               <div style={{
                 fontSize: 12, fontWeight: 700, marginBottom: (isCircle || isImage || isSticker) ? 4 : 2,
@@ -1128,7 +1366,6 @@ export default function App() {
 
                 <div ref={scrollRef} className="chat-scroll">
 
-                  {/* ИНДИКАТОР ЗАГРУЗКИ ФАЙЛОВ */}
                   {isUploading && (
                       <div style={{position: 'absolute', top: 85, left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.6)', color: 'white', padding: '6px 16px', borderRadius: 20, fontSize: 13, zIndex: 200, backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', gap: 8, animation: 'popIn 0.3s ease'}}>
                         <RefreshCw size={14} style={{animation: 'spin 1s linear infinite'}} /> Загрузка медиа...
@@ -1300,5 +1537,13 @@ export default function App() {
           )}
         </div>
       </div>
+  );
+}
+
+export default function App() {
+  return (
+      <ErrorBoundary>
+        <MainApp />
+      </ErrorBoundary>
   );
 }
