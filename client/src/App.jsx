@@ -115,6 +115,7 @@ const auraStyles = (isDark) => `
   .avatar-huge { width: 110px; height: 110px; border-radius: 50%; object-fit: cover; margin: 0 auto; display: block; background: #eee; border: 3px solid var(--ios-blue); }
   
   .error-toast { position: absolute; top: 100px; left: 20px; right: 20px; background: rgba(255, 59, 48, 0.9); backdrop-filter: blur(10px); color: white; padding: 12px; border-radius: 12px; text-align: center; z-index: 3000; animation: slideInUp 0.3s ease; font-weight: bold; }
+  .error-toast.success-toast { background: rgba(52, 199, 89, 0.9); }
   @keyframes slideInUp { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
   .blur-overlay { position: fixed; inset: 0; background: ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.2)'}; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); z-index: 2000; animation: fadeIn 0.2s ease; display: flex; justify-content: center; align-items: center; }
   @keyframes fadeIn { from { opacity: 0; backdrop-filter: blur(0px); } to { opacity: 1; backdrop-filter: blur(12px); } }
@@ -142,7 +143,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [formData, setFormData] = useState({ username: '', password: '', name: '' });
   const [loading, setLoading] = useState(false);
-  const [authStep, setAuthStep] = useState('login');
+  const [authStep, setAuthStep] = useState('login'); // 'login', 'reg', 'reset'
   const [globalError, setGlobalError] = useState(null);
 
   // Состояния для записи кружков и голосовых
@@ -178,8 +179,6 @@ export default function App() {
   const pressTimer = useRef(null);
   const callTimer = useRef(null);
   const isHolding = useRef(false);
-  const startY = useRef(0);
-  const startX = useRef(0);
   const lastTapRef = useRef(0);
 
   // ИНИЦИАЛИЗАЦИЯ
@@ -274,16 +273,14 @@ export default function App() {
 
   const showError = (msg) => { setGlobalError(msg); setTimeout(() => setGlobalError(null), 3000); };
 
-  // 🛡 ЗАЩИТА АВТОРИЗАЦИИ: Санитайзер логина + Отлов сетевых ошибок
+  // 🛡 АВТОРИЗАЦИЯ И СБРОС ПАРОЛЯ
   const handleAuth = async () => {
     const { username, password, name } = formData;
     if (!username || !password) return showError("Введите логин и пароль");
     setLoading(true);
 
     try {
-      // Убираем случайные пробелы, которые ломают базу данных
       const safeUsername = username.toLowerCase().replace(/\s+/g, '');
-
       if (safeUsername.length < 3) {
         setLoading(false);
         return showError("Логин должен быть от 3 символов без пробелов");
@@ -319,6 +316,30 @@ export default function App() {
     } catch (e) {
       console.error(e);
       showError("Ошибка соединения с сервером. Попробуйте еще раз.");
+    }
+    setLoading(false);
+  };
+
+  const handleResetPassword = async () => {
+    const { username, password } = formData;
+    if (!username || !password) return showError("Введите логин и новый пароль");
+    setLoading(true);
+
+    try {
+      const safeUsername = username.toLowerCase().replace(/\s+/g, '');
+      const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', safeUsername);
+      const snap = await getDoc(userRef);
+
+      if (snap.exists()) {
+        await updateDoc(userRef, { password: password });
+        setGlobalError("✅ Пароль успешно изменен!");
+        setTimeout(() => setAuthStep('login'), 1500);
+      } else {
+        showError("Пользователь с таким логином не найден!");
+      }
+    } catch (e) {
+      console.error(e);
+      showError("Ошибка соединения с сервером.");
     }
     setLoading(false);
   };
@@ -359,7 +380,7 @@ export default function App() {
     try { return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch(e) { return ''; }
   };
 
-  // --- ЛОГИКА ЗАПИСИ МЕДИА ---
+  // --- ЛОГИКА ЗАПИСИ МЕДИА (ОТПРАВКА КНОПКАМИ) ---
   const startMediaRecording = async (type) => {
     try {
       const constraints = { audio: true, video: type === 'video' ? { facingMode: cameraFacing, width: 400, height: 400 } : false };
@@ -453,47 +474,34 @@ export default function App() {
     }
   };
 
+  // ОБНОВЛЕНО: Нажатие сразу запускает запись и фиксирует кнопки. Отмена только кнопкой.
   const handlePointerDown = (e) => {
+    if (isRecording) return;
     isHolding.current = false;
-    setIsLocked(false);
-    startY.current = e.clientY;
-    startX.current = e.clientX;
     pressTimer.current = setTimeout(() => {
       isHolding.current = true;
+      setIsLocked(true); // Автоматическая фиксация UI (появляются кнопки "Корзина" и "Отправить")
       startMediaRecording(mode);
-    }, 300);
-  };
-
-  const handlePointerMove = (e) => {
-    if (isHolding.current && !isLocked) {
-      if (startY.current - e.clientY > 50) {
-        setIsLocked(true);
-      } else if (startX.current - e.clientX > 60) {
-        cancelMediaRecording();
-      }
-    }
+    }, 200); // Быстрый старт
   };
 
   const handlePointerUp = (e) => {
     clearTimeout(pressTimer.current);
-    if (isLocked && isRecording) return;
+    if (isLocked && isRecording) return; // Если запись пошла, ничего не делаем при отпускании
 
-    if (isHolding.current) {
-      stopMediaRecording();
-    } else {
-      if (!isRecording) setMode(prev => prev === 'voice' ? 'video' : 'voice');
+    if (!isHolding.current && !isRecording) {
+      // Если это был быстрый клик (не удержание)
+      setMode(prev => prev === 'voice' ? 'video' : 'voice');
     }
     isHolding.current = false;
   };
 
   // --- 🛑 ГРАНИЦА АВТОРИЗАЦИИ 🛑 ---
-  // Рендерим Логин Экран СРАЗУ, если user равен null.
-  // Это предотвращает фатальные краши при обращении к user.username в фоновых процессах.
   if (!user) return (
       <div className="app-container">
         <style>{auraStyles(isDark)}</style>
         <div style={{width: '100%', maxWidth: 400, padding: 30, background: 'var(--card-bg)', borderRadius: 24, alignSelf: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.2)', animation: 'popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'}}>
-          {globalError && <div className="error-toast">{globalError}</div>}
+          {globalError && <div className={`error-toast ${globalError.startsWith('✅') ? 'success-toast' : ''}`}>{globalError}</div>}
           <div className="akashi-logo">
             <div className="akashi-glow"></div>
             <svg viewBox="0 0 100 100" style={{width: 60, height: 60, position: 'relative', zIndex: 10, filter: 'drop-shadow(0 0 8px rgba(255,0,0,1))'}} fill="none">
@@ -504,21 +512,39 @@ export default function App() {
           </div>
           <h2 style={{textAlign: 'center', marginBottom: 25, fontSize: 24, fontWeight: 800}}>Вход в Aura</h2>
           <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
-            <input className="ios-input" placeholder="Логин (без пробелов)" onChange={e => setFormData({...formData, username: e.target.value})} />
-            <input className="ios-input" type="password" placeholder="Пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
-            {authStep === 'reg' && <input className="ios-input" placeholder="Ваше имя" onChange={e => setFormData({...formData, name: e.target.value})} />}
-            <button className="btn-primary" style={{marginTop: 10}} onClick={handleAuth}>{loading ? 'Загрузка...' : 'Продолжить'}</button>
-            <button style={{background: 'none', border: 'none', color: 'var(--ios-blue)', cursor: 'pointer', fontWeight: 600}} onClick={() => setAuthStep(authStep === 'reg' ? 'login' : 'reg')}>
-              {authStep === 'reg' ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Создать'}
-            </button>
+
+            {authStep === 'reset' ? (
+                <>
+                  <input className="ios-input" placeholder="Логин (без пробелов)" onChange={e => setFormData({...formData, username: e.target.value})} />
+                  <input className="ios-input" type="password" placeholder="Новый пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
+                  <button className="btn-primary" style={{marginTop: 10}} onClick={handleResetPassword}>{loading ? 'Загрузка...' : 'Сменить пароль'}</button>
+                  <button style={{background: 'none', border: 'none', color: 'var(--text-sec)', cursor: 'pointer', fontWeight: 600, marginTop: 10}} onClick={() => setAuthStep('login')}>
+                    Вернуться ко входу
+                  </button>
+                </>
+            ) : (
+                <>
+                  <input className="ios-input" placeholder="Логин (без пробелов)" onChange={e => setFormData({...formData, username: e.target.value})} />
+                  <input className="ios-input" type="password" placeholder="Пароль" onChange={e => setFormData({...formData, password: e.target.value})} />
+                  {authStep === 'reg' && <input className="ios-input" placeholder="Ваше имя" onChange={e => setFormData({...formData, name: e.target.value})} />}
+                  <button className="btn-primary" style={{marginTop: 10}} onClick={handleAuth}>{loading ? 'Загрузка...' : 'Продолжить'}</button>
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8}}>
+                    <button style={{background: 'none', border: 'none', color: 'var(--text-sec)', cursor: 'pointer', fontSize: 14}} onClick={() => setAuthStep('reset')}>
+                      Забыли пароль?
+                    </button>
+                    <button style={{background: 'none', border: 'none', color: 'var(--ios-blue)', cursor: 'pointer', fontWeight: 600, fontSize: 14}} onClick={() => setAuthStep(authStep === 'reg' ? 'login' : 'reg')}>
+                      {authStep === 'reg' ? 'Уже есть аккаунт?' : 'Создать аккаунт'}
+                    </button>
+                  </div>
+                </>
+            )}
+
           </div>
         </div>
       </div>
   );
 
   // --- 🟢 ЗОНА БЕЗОПАСНОСТИ 🟢 ---
-  // Сюда код доходит ТОЛЬКО если пользователь 100% залогинен.
-  // Никаких 'TypeError: Cannot read properties of null (reading username)' больше не будет!
 
   const sendMessage = async (val, type = 'text', forwardedFrom = null) => {
     if (!val.trim() && type === 'text') return;
@@ -757,7 +783,6 @@ export default function App() {
     closeContextMenu();
   };
 
-  // Вычисления данных теперь 100% безопасны
   const filteredUsers = allUsers.filter(u => u.username !== user.username).filter(u => {
     if (!searchQuery) return true;
     const lowerQ = searchQuery.toLowerCase().replace('@', '').trim();
@@ -1082,7 +1107,7 @@ export default function App() {
                         {formatTime(recTime)}
                       </div>
 
-                      {isLocked ? (
+                      {isLocked && (
                           <div style={{display: 'flex', alignItems: 'center', gap: 40, marginTop: 40, animation: 'popIn 0.3s ease'}}>
                             <button onClick={cancelMediaRecording} style={{background: '#FF3B30', color: 'white', borderRadius: '50%', width: 60, height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 5px 15px rgba(255,59,48,0.4)'}}>
                               <Trash2 size={28} />
@@ -1097,19 +1122,13 @@ export default function App() {
                               <Send size={32} />
                             </button>
                           </div>
-                      ) : (
-                          <div style={{marginTop: 40, color: 'white', display: 'flex', flexDirection: 'column', alignItems: 'center', opacity: 0.8}}>
-                            <Lock size={28} style={{marginBottom: 10}} />
-                            <span style={{fontSize: 16, fontWeight: 500}}>Свайп вверх для фиксации</span>
-                            <span style={{fontSize: 14, fontWeight: 400, opacity: 0.6, marginTop: 5}}>Свайп влево для отмены</span>
-                          </div>
                       )}
                     </div>
                 ) : isRecording === 'voice' ? (
                     <div style={{position: 'absolute', bottom: 85, left: 0, right: 0, display: 'flex', justifyContent: 'center', zIndex: 150}}>
                       <div className="glass-panel" style={{borderRadius: 40, padding: isLocked ? '10px 20px' : '8px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '90%', maxWidth: 400, boxShadow: '0 10px 25px rgba(0,0,0,0.2)', border: '1px solid var(--sep)'}}>
 
-                        {isLocked ? (
+                        {isLocked && (
                             <>
                               <button onClick={cancelMediaRecording} style={{background: 'none', border: 'none', cursor: 'pointer', padding: 8}}><Trash2 size={24} color="#FF3B30"/></button>
                               <div style={{display: 'flex', alignItems: 'center', gap: 10, color: '#FF3B30', fontWeight: 'bold', fontSize: 18}}>
@@ -1122,19 +1141,6 @@ export default function App() {
                               <button onClick={() => { stopMediaRecording(); setIsLocked(false); }} style={{background: 'var(--ios-blue)', color: 'white', borderRadius: '50%', width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer'}}>
                                 <Send size={20} />
                               </button>
-                            </>
-                        ) : (
-                            <>
-                              <div style={{display: 'flex', alignItems: 'center', gap: 15}}>
-                                <div style={{width: 10, height: 10, borderRadius: '50%', background: '#FF3B30', animation: 'pulseGlow 1s infinite'}} />
-                                <span style={{color: '#FF3B30', fontWeight: 'bold', fontSize: 18}}>{formatTime(recTime)}</span>
-                              </div>
-                              <div style={{color: 'var(--text-sec)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, animation: 'slideIn 0.3s'}}>
-                                <ChevronLeft size={16}/> Влево отмена
-                              </div>
-                              <div style={{width: 40, height: 40, borderRadius: '50%', background: 'var(--ios-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'popIn 0.3s'}}>
-                                <Mic size={20} color="white" />
-                              </div>
                             </>
                         )}
 
@@ -1163,10 +1169,7 @@ export default function App() {
                   ) : (
                       <button
                           onPointerDown={handlePointerDown}
-                          onPointerMove={handlePointerMove}
                           onPointerUp={handlePointerUp}
-                          onPointerLeave={handlePointerUp}
-                          onPointerCancel={handlePointerUp}
                           style={{
                             touchAction: 'none',
                             background: 'none', border: 'none',
