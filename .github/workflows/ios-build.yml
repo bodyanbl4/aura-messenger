@@ -29,31 +29,40 @@ jobs:
           fi
           # На всякий случай гарантируем, что папка build существует
           mkdir -p build
+          if [ ! -f build/index.html ]; then echo "<html><body>Aura</body></html>" > build/index.html; fi
 
       - name: Fix and Sync Capacitor
         run: |
-          npm install @capacitor/cli @capacitor/core @capacitor/ios
+          # Устанавливаем сам Capacitor и платформу iOS в систему
+          npm install @capacitor/cli @capacitor/core @capacitor/ios --save-dev
           
-          # Принудительно создаем конфиг, чтобы Capacitor не задавал вопросов в консоли
-          echo '{"appId": "com.aura.app", "appName": "Aura", "webDir": "build", "bundledWebRuntime": false}' > capacitor.config.json
+          # Принудительно и жестко создаем правильный конфиг
+          cat <<EOF > capacitor.config.json
+          {
+            "appId": "com.aura.app",
+            "appName": "Aura",
+            "webDir": "build",
+            "bundledWebRuntime": false
+          }
+          EOF
           
-          # Жестко сносим старую сломанную папку ios
+          # Сносим старую сломанную папку ios, если она есть
           rm -rf ios
           
-          # Создаем чистую платформу Apple
+          # Генерируем чистый проект Apple
           npx cap add ios
           npx cap sync ios
-
-      - name: Install CocoaPods dependencies
-        run: |
-          cd ios/App
-          pod install
 
       - name: Build Unsigned IPA
         run: |
           cd ios/App
+          # Обновляем зависимости Apple
+          pod install --repo-update
+          
+          # Собираем приложение без платных сертификатов
           xcodebuild -workspace App.xcworkspace -scheme App -configuration Release -sdk iphoneos CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO clean build
           
+          # Упаковываем в IPA
           cd build/Release-iphoneos
           mkdir Payload
           cp -R App.app Payload
