@@ -26,189 +26,164 @@ jobs:
       - name: Create Build Folder
         run: |
           mkdir -p build
-          cat > build/index.html << 'EOF'
-  <!DOCTYPE html>
-  <html lang="ru">
-  <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Aura">
-  <title>Aura Messenger</title>
-  <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
-background: #0A0A0F;
-color: white;
-display: flex;
-justify-content: center;
-align-items: center;
-min-height: 100vh;
-}
-.loading { text-align: center; }
-  .logo {
-width: 80px;
-height: 80px;
-background: linear-gradient(135deg, #FF3B30, #FF6B5E);
-border-radius: 24px;
-margin: 0 auto 20px;
-animation: pulse 1.5s infinite;
-}
-  @keyframes pulse {
-0%, 100% { transform: scale(1); }
-50% { transform: scale(1.05); }
-}
-h1 { font-size: 32px; margin-bottom: 10px; }
-p { color: #8E8E93; }
-  </style>
-  </head>
-  <body>
-  <div id="root">
-  <div class="loading">
-  <div class="logo"></div>
-  <h1>AURA</h1>
-  <p>Loading...</p>
-  </div>
-  </div>
-  </body>
-  </html>
-  EOF
-  echo "✅ Build folder created"
+          echo '<!DOCTYPE html>
+          <html lang="ru">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+            <meta name="apple-mobile-web-app-capable" content="yes">
+            <title>Aura Messenger</title>
+            <style>
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              body { 
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+                background: #0A0A0F;
+                color: white;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+              }
+              .loading { text-align: center; }
+              .logo { 
+                width: 80px; 
+                height: 80px; 
+                background: linear-gradient(135deg, #FF3B30, #FF6B5E);
+                border-radius: 24px;
+                margin: 0 auto 20px;
+                animation: pulse 1.5s infinite;
+              }
+              @keyframes pulse {
+                0%, 100% { transform: scale(1); }
+                50% { transform: scale(1.05); }
+              }
+              h1 { font-size: 32px; margin-bottom: 10px; }
+              p { color: #8E8E93; }
+            </style>
+          </head>
+          <body>
+            <div id="root">
+              <div class="loading">
+                <div class="logo"></div>
+                <h1>AURA</h1>
+                <p>Loading...</p>
+              </div>
+            </div>
+          </body>
+          </html>' > build/index.html
+          echo "Build folder created"
 
-- name: Setup Capacitor
-  run: |
-    cat > capacitor.config.json << 'EOF'
-  {
-    "appId": "com.aura.app",
-    "appName": "Aura",
-    "webDir": "build",
-    "bundledWebRuntime": false
-  }
-  EOF
-  
-  rm -rf ios
-  npx cap add ios
-  npx cap sync ios
-  
-  echo "✅ Capacitor configured"
+      - name: Setup Capacitor
+        run: |
+          echo '{
+            "appId": "com.aura.app",
+            "appName": "Aura",
+            "webDir": "build",
+            "bundledWebRuntime": false
+          }' > capacitor.config.json
+          
+          rm -rf ios
+          npx cap add ios
+          npx cap sync ios
+          echo "Capacitor configured"
 
-- name: Create Podfile
-  run: |
-    mkdir -p ios/App
-    cd ios/App
-    
-    cat > Podfile << 'EOF'
-  platform :ios, '14.0'
-  use_frameworks! :linkage => :static
-  
-  target 'App' do
-  pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'
-  end
-  EOF
-  
-  pod install --repo-update || true
-  
-  echo "✅ Podfile created"
+      - name: Create Podfile
+        run: |
+          mkdir -p ios/App
+          cd ios/App
+          echo 'platform :ios, "14.0"
+          use_frameworks! :linkage => :static
 
-- name: Configure Info.plist
-  run: |
-    cd ios/App/App
-    
-    if [ ! -f Info.plist ]; then
-      cat > Info.plist << 'EOF'
-  <?xml version="1.0" encoding="UTF-8"?>
-  <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-  <plist version="1.0">
-  <dict>
-  <key>CFBundleDevelopmentRegion</key>
-  <string>en</string>
-  <key>CFBundleDisplayName</key>
-  <string>Aura</string>
-  <key>CFBundleExecutable</key>
-  <string>$(EXECUTABLE_NAME)</string>
-  <key>CFBundleIdentifier</key>
-  <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-  <key>CFBundleInfoDictionaryVersion</key>
-  <string>6.0</string>
-  <key>CFBundleName</key>
-  <string>Aura</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-  <key>CFBundleShortVersionString</key>
-  <string>1.0</string>
-  <key>CFBundleVersion</key>
-  <string>1</string>
-  <key>LSRequiresIPhoneOS</key>
-  <true/>
-  <key>UILaunchStoryboardName</key>
-  <string>LaunchScreen</string>
-  <key>UIMainStoryboardFile</key>
-  <string>LaunchScreen</string>
-  <key>UIRequiredDeviceCapabilities</key>
-  <array>
-  <string>armv7</string>
-  </array>
-  <key>UISupportedInterfaceOrientations</key>
-  <array>
-  <string>UIInterfaceOrientationPortrait</string>
-  </array>
-  <key>NSMicrophoneUsageDescription</key>
-  <string>Aura needs microphone for voice messages and calls</string>
-  <key>NSCameraUsageDescription</key>
-  <string>Aura needs camera for video calls and photos</string>
-  <key>NSPhotoLibraryUsageDescription</key>
-  <string>Aura needs photo library access to share images</string>
-  <key>NSAppTransportSecurity</key>
-  <dict>
-  <key>NSAllowsArbitraryLoads</key>
-  <true/>
-  </dict>
-  </dict>
-  </plist>
-  EOF
-  fi
-  
-  echo "✅ Info.plist configured"
+          target "App" do
+            pod "Capacitor", :path => "../../node_modules/@capacitor/ios"
+          end' > Podfile
+          
+          pod install --repo-update || true
+          echo "Podfile created"
 
-- name: Build iOS App
-  run: |
-    cd ios/App
-    
-    xcodebuild -workspace App.xcworkspace \
-      -scheme App \
-      -configuration Release \
-      -sdk iphoneos \
-      -derivedDataPath build \
-      CODE_SIGN_IDENTITY="" \
-      CODE_SIGNING_REQUIRED=NO \
-      CODE_SIGNING_ALLOWED=NO \
-      clean build || true
+      - name: Configure Info.plist
+        run: |
+          cd ios/App/App
+          
+          echo '<?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleDevelopmentRegion</key>
+              <string>en</string>
+              <key>CFBundleDisplayName</key>
+              <string>Aura</string>
+              <key>CFBundleExecutable</key>
+              <string>$(EXECUTABLE_NAME)</string>
+              <key>CFBundleIdentifier</key>
+              <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundleName</key>
+              <string>Aura</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+              <key>LSRequiresIPhoneOS</key>
+              <true/>
+              <key>UILaunchStoryboardName</key>
+              <string>LaunchScreen</string>
+              <key>UIMainStoryboardFile</key>
+              <string>LaunchScreen</string>
+              <key>UIRequiredDeviceCapabilities</key>
+              <array>
+                  <string>armv7</string>
+              </array>
+              <key>UISupportedInterfaceOrientations</key>
+              <array>
+                  <string>UIInterfaceOrientationPortrait</string>
+              </array>
+              <key>NSMicrophoneUsageDescription</key>
+              <string>Aura needs microphone for voice messages and calls</string>
+              <key>NSCameraUsageDescription</key>
+              <string>Aura needs camera for video calls and photos</string>
+              <key>NSPhotoLibraryUsageDescription</key>
+              <string>Aura needs photo library access to share images</string>
+              <key>NSAppTransportSecurity</key>
+              <dict>
+                  <key>NSAllowsArbitraryLoads</key>
+                  <true/>
+              </dict>
+          </dict>
+          </plist>' > Info.plist
+          
+          echo "Info.plist configured"
 
-- name: Create IPA
-  run: |
-    cd ios/App
-    
-    APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" 2>/dev/null | head -n 1)
-    
-    if [ -z "$APP_PATH" ]; then
-      echo "⚠️ App not found, creating empty placeholder"
-      mkdir -p Payload
-      echo "Placeholder" > Payload/placeholder.txt
-    else
-      mkdir -p Payload
-      cp -R "$APP_PATH" Payload/
-    fi
-    
-    zip -qr Aura.ipa Payload
-    mv Aura.ipa ../../../
-    
-    echo "✅ IPA created"
+      - name: Build iOS App
+        run: |
+          cd ios/App
+          xcodebuild -workspace App.xcworkspace -scheme App -configuration Release -sdk iphoneos -derivedDataPath build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO clean build || true
+          echo "Build completed"
 
-- name: Upload IPA
-  uses: actions/upload-artifact@v4
-  with:
-    name: Aura-iOS
-    path: Aura.ipa
-    retention-days: 30
+      - name: Create IPA
+        run: |
+          cd ios/App
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" 2>/dev/null | head -n 1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "Creating placeholder"
+            mkdir -p Payload
+            echo "Placeholder" > Payload/placeholder.txt
+          else
+            mkdir -p Payload
+            cp -R "$APP_PATH" Payload/
+          fi
+          
+          zip -qr Aura.ipa Payload
+          mv Aura.ipa ../../../
+          echo "IPA created"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aura-iOS
+          path: Aura.ipa
+          retention-days: 30
