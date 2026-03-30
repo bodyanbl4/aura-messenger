@@ -23,26 +23,25 @@ jobs:
       - name: Build React App
         run: |
           CI=false npm run build
-          # Если сборщик создал папку dist вместо build, переименовываем её!
+          # Если сборщик создал dist вместо build, переименовываем
           if [ -d "dist" ] && [ ! -d "build" ]; then
             mv dist build
           fi
+          # На всякий случай гарантируем, что папка build существует
+          mkdir -p build
 
       - name: Fix and Sync Capacitor
         run: |
           npm install @capacitor/cli @capacitor/core @capacitor/ios
           
-          # Инициализируем Capacitor, если его еще нет
-          if [ ! -f capacitor.config.json ] && [ ! -f capacitor.config.ts ]; then
-            npx cap init Aura com.aura.app --web-dir build
-          fi
+          # Принудительно создаем конфиг, чтобы Capacitor не задавал вопросов в консоли
+          echo '{"appId": "com.aura.app", "appName": "Aura", "webDir": "build", "bundledWebRuntime": false}' > capacitor.config.json
           
-          # Если папки ios нет или она пришла сломанной с Windows, пересоздаем её на Mac
-          if [ ! -f ios/App/Podfile ]; then
-            rm -rf ios
-            npx cap add ios
-          fi
+          # Жестко сносим старую сломанную папку ios
+          rm -rf ios
           
+          # Создаем чистую платформу Apple
+          npx cap add ios
           npx cap sync ios
 
       - name: Install CocoaPods dependencies
