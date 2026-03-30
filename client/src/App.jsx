@@ -1,16 +1,19 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Component } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
-import { getStorage, ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc, query, where, arrayUnion } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
+
+// Импортируем иконки
 import {
-  Search, MessageCircle, ChevronLeft, Send, User as UserIcon, LogOut, Moon,
-  Camera, ChevronRight, Globe, Edit3, Mic, Check, CheckCheck, Paperclip,
-  Trash, Trash2, Pin, Smile, Forward, Phone, Video, X, PhoneMissed, PhoneIncoming,
-  RefreshCw, Lock, Pause, Play, MonitorUp, MicOff, Settings, ShieldAlert
+  AlertTriangle, Zap, Search, Globe, MessageCircle, Phone, PhoneIncoming,
+  PhoneForwarded, PhoneCall, ChevronLeft, Video, Info, Pin, X, Check,
+  CheckCheck, File as FileIcon, Download, RefreshCw, Paperclip, Send,
+  Camera, Mic, Image as ImageIcon, Music, Play, Pause, Settings, Eraser,
+  MicOff as MicMute, Monitor, PhoneOff, Trash, Trash2, Reply, Edit3, Bell, Minimize, Maximize, Volume2
 } from 'lucide-react';
 
-// --- 🔑 КОНФИГУРАЦИЯ FIREBASE ---
+// --- 🔑 FIREBASE CONFIG ---
 const firebaseConfig = {
   apiKey: "AIzaSyBI5cMQ-zwjU1s4je2zzqBPpepSfBy0mKg",
   authDomain: "aura-748c8.firebaseapp.com",
@@ -21,291 +24,351 @@ const firebaseConfig = {
   measurementId: "G-9X9QMW22Z1"
 };
 
-const envConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : firebaseConfig;
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'aura-pro-v28';
-const app = !getApps().length ? initializeApp(envConfig) : getApps()[0];
+const appId = 'aura-pro-v28';
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApps()[0];
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
 
-// --- НАСТРОЙКИ WEBRTC (STUN + TURN СЕРВЕРЫ ДЛЯ ЗВОНКОВ ЧЕРЕЗ ЛЮБУЮ СЕТЬ) ---
-const rtcServers = {
+const NOTIFICATION_SOUND = 'https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3';
+const RINGTONE_SOUND = 'https://assets.mixkit.co/active_storage/sfx/1359/1359-preview.mp3';
+const RTC_SERVERS = {
   iceServers: [
-    {
-      urls: [
-        'stun:stun.l.google.com:19302',
-        'stun:stun1.l.google.com:19302',
-        'stun:stun2.l.google.com:19302',
-        'stun:stun3.l.google.com:19302',
-        'stun:stun4.l.google.com:19302',
-        'stun:global.stun.twilio.com:3478'
-      ]
-    },
-    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
-  ],
-  iceCandidatePoolSize: 10
+    { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' }
+  ]
 };
 
-const ANIMATED_STICKERS = [
-  'https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.gif',
-  'https://fonts.gstatic.com/s/e/notoemoji/latest/2764_fe0f/512.gif',
-  'https://fonts.gstatic.com/s/e/notoemoji/latest/1f525/512.gif',
-  'https://fonts.gstatic.com/s/e/notoemoji/latest/1f60e/512.gif',
-  'https://fonts.gstatic.com/s/e/notoemoji/latest/1f973/512.gif',
-  'https://fonts.gstatic.com/s/e/notoemoji/latest/1f44d/512.gif',
-  'https://fonts.gstatic.com/s/e/notoemoji/latest/1f92f/512.gif',
-  'https://fonts.gstatic.com/s/e/notoemoji/latest/1f47d/512.gif',
-];
-
-const auraStyles = (isDark) => `
-  :root { 
-    --ios-blue: #007AFF; 
-    --ios-bg: ${isDark ? '#000000' : '#F2F2F7'};
-    --card-bg: ${isDark ? '#1C1C1E' : '#FFFFFF'};
-    --text-main: ${isDark ? '#FFFFFF' : '#000000'};
-    --text-sec: #8E8E93;
-    --sep: ${isDark ? '#38383A' : '#C6C6C8'};
-    --nav-bg: ${isDark ? 'rgba(28, 28, 30, 0.85)' : 'rgba(255, 255, 255, 0.85)'};
-    --bubble-me: var(--ios-blue);
-    --bubble-me-text: #FFFFFF;
+// ==========================================
+// 1. ЗАЩИТА ОТ КРАША
+// ==========================================
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  componentDidCatch(error, errorInfo) { console.error("Aura Guard:", error, errorInfo); }
+  render() {
+    if (this.state.hasError) return (
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100vh', background:'#050505', color:'white' }}>
+          <AlertTriangle size={64} color="#FF3B30" style={{marginBottom: 20}} />
+          <h2 style={{fontSize: 28, fontWeight: 800}}>Сбой компонента</h2>
+          <p style={{opacity: 0.6, marginBottom: 30}}>Мы перехватили ошибку и спасли приложение от вылета.</p>
+          <button onClick={() => { localStorage.removeItem('aura_msgs_cache'); this.setState({hasError: false}); window.location.reload(); }} style={{padding:'16px 32px', background:'#FF3B30', color:'white', borderRadius:20, border:'none', cursor:'pointer', fontWeight: 700}}>Очистить кэш и продолжить</button>
+        </div>
+    );
+    return this.props.children;
   }
-  
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
-  body { 
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-    background: #000; color: var(--text-main); 
-    overflow: hidden; 
-    position: fixed; inset: 0; 
-    overscroll-behavior: none; touch-action: none; 
-  }
-  
-  .app-container { width: 100vw; height: 100vh; display: flex; justify-content: center; background: #000; overscroll-behavior: none; }
-  .phone-screen { width: 100%; max-width: 500px; height: 100%; background: var(--ios-bg); position: relative; display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none; }
-  .view-container { flex: 1; display: flex; flex-direction: column; height: 100%; animation: slideIn 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); position: relative; overflow: hidden; touch-action: pan-y; }
-  
-  @keyframes slideIn { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-  @keyframes popIn { 0% { transform: scale(0.95) translateY(10px); opacity: 0; } 100% { transform: scale(1) translateY(0); opacity: 1; } }
-  @keyframes pulseGlow { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
-  @keyframes callPulse { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(1.8); opacity: 0; } }
-  @keyframes spin { 100% { transform: rotate(360deg); } }
-  
-  .ios-input { width: 100%; padding: 14px 16px; border-radius: 12px; border: 1.5px solid var(--sep); background: ${isDark ? '#2C2C2E' : '#FFFFFF'}; color: var(--text-main); font-size: 16px; outline: none; }
-  .btn-primary { width: 100%; padding: 16px; background: var(--ios-blue); color: white; border: none; border-radius: 16px; font-weight: 700; font-size: 17px; cursor: pointer; }
-  .btn-primary:active { transform: scale(0.97); }
-  
-  .glass-panel { background: var(--nav-bg); backdrop-filter: blur(25px) saturate(180%); -webkit-backdrop-filter: blur(25px) saturate(180%); }
-  .nav-bar { padding: 55px 16px 15px; border-bottom: 0.5px solid var(--sep); display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 50; }
-  .ios-list { background: var(--card-bg); margin: 16px; border-radius: 12px; overflow: hidden; }
-  .ios-item { display: flex; align-items: center; padding: 12px 16px; cursor: pointer; border: none; background: none; text-align: left; width: 100%; color: var(--text-main); position: relative; }
-  .ios-item:active { background: ${isDark ? '#2C2C2E' : '#E5E5EA'}; }
-  .ios-item:not(:last-child)::after { content: ''; position: absolute; left: 70px; right: 0; bottom: 0; height: 0.5px; background: var(--sep); }
-  
-  .chat-scroll { flex: 1; overflow-y: auto; padding: 12px 16px 100px; display: flex; flex-direction: column; gap: 8px; background: ${isDark ? '#000' : '#E6EBF0'}; background-image: ${isDark ? 'none' : "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')"}; background-attachment: fixed; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
-  
-  .chat-bubble { max-width: 80%; width: fit-content; padding: 8px 12px; border-radius: 18px; font-size: 16px; position: relative; word-wrap: break-word; line-height: 1.3; animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-shadow: 0 1px 2px rgba(0,0,0,0.1); user-select: none; display: flex; flex-direction: column; }
-  .bubble-me { background: var(--bubble-me); color: var(--bubble-me-text); align-self: flex-end; border-bottom-right-radius: 4px; }
-  .bubble-other { background: var(--card-bg); color: var(--text-main); align-self: flex-start; border-bottom-left-radius: 4px; }
-  
-  .system-bubble { align-self: center; background: rgba(0,0,0,0.3); color: white; padding: 6px 14px; border-radius: 16px; font-size: 13px; font-weight: 500; backdrop-filter: blur(10px); margin: 10px 0; text-align: center; max-width: 90%; }
-  .circle-video-wrap { width: 220px; height: 220px; border-radius: 50%; overflow: hidden; border: 3px solid ${isDark ? '#31A24C' : '#E1FFC7'}; background: #000; position: relative; cursor: pointer; flex-shrink: 0; }
-  .circle-video-wrap video { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
-  .unread-dot { position: absolute; bottom: 20px; right: 20px; width: 14px; height: 14px; background: white; border-radius: 50%; box-shadow: 0 0 10px rgba(0,0,0,0.5); border: 2px solid var(--ios-blue); }
-  
-  .reaction-badge { position: absolute; bottom: -10px; right: -10px; background: var(--card-bg); border-radius: 12px; padding: 2px 6px; font-size: 14px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); border: 1px solid var(--sep); cursor: pointer; transition: transform 0.1s; z-index: 15; }
-  .reaction-badge:active { transform: scale(0.9); }
-  
-  .sticker-img-3d { 
-    width: 120px; height: 120px; object-fit: contain; animation: popIn 0.4s; 
-    filter: drop-shadow(0 12px 20px rgba(0,0,0,0.4)) saturate(1.4) contrast(1.15); 
-  }
-  
-  .attachment-img { max-width: 240px; max-height: 300px; border-radius: 12px; object-fit: cover; display: block; }
-  .tab-bar { height: 85px; border-top: 0.5px solid var(--sep); display: flex; justify-content: space-around; padding-top: 10px; flex-shrink: 0; z-index: 100; }
-  .tab-item { display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--text-sec); cursor: pointer; border: none; background: none; flex: 1; }
-  .tab-item.active { color: var(--ios-blue); }
-  
-  .avatar { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 0.5px solid var(--sep); background: #eee; }
-  .avatar-huge { width: 110px; height: 110px; border-radius: 50%; object-fit: cover; margin: 0 auto; display: block; background: #eee; border: 3px solid var(--ios-blue); }
-  
-  .error-toast { position: absolute; top: 100px; left: 20px; right: 20px; background: rgba(255, 59, 48, 0.9); backdrop-filter: blur(10px); color: white; padding: 12px; border-radius: 12px; text-align: center; z-index: 3000; animation: slideInUp 0.3s ease; font-weight: bold; }
-  .error-toast.success-toast { background: rgba(52, 199, 89, 0.9); }
-  @keyframes slideInUp { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-  .blur-overlay { position: fixed; inset: 0; background: ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.2)'}; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); z-index: 2000; animation: fadeIn 0.2s ease; display: flex; justify-content: center; align-items: center; }
-  @keyframes fadeIn { from { opacity: 0; backdrop-filter: blur(0px); } to { opacity: 1; backdrop-filter: blur(12px); } }
-  .context-menu-popup { background: var(--card-bg); border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); overflow: hidden; border: 1px solid var(--sep); }
-  .context-menu-btn { width: 100%; padding: 14px 16px; background: none; border: none; border-bottom: 0.5px solid var(--sep); color: var(--text-main); font-size: 16px; text-align: left; display: flex; align-items: center; gap: 12px; cursor: pointer; }
-  .context-menu-btn:active { background: ${isDark ? '#2C2C2E' : '#F2F2F7'}; }
-  .context-menu-btn.danger { color: #FF3B30; }
-  .akashi-logo { width: 90px; height: 90px; background: #0a0a0a; border-radius: 24px; margin: 0 auto 25px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; box-shadow: 0 0 30px rgba(220,38,38,0.4); border: 1px solid rgba(239,68,68,0.2); }
-  .akashi-glow { position: absolute; inset: 0; background: rgba(220,38,38,0.25); filter: blur(15px); border-radius: 50%; }
-  .call-ring { position: absolute; inset: 0; border-radius: 50%; background: var(--ios-blue); z-index: 0; animation: callPulse 2s infinite ease-out; }
-  .local-video-pip { position: absolute; bottom: 120px; right: 20px; width: 100px; height: 140px; border-radius: 16px; overflow: hidden; box-shadow: 0 5px 20px rgba(0,0,0,0.4); border: 2px solid rgba(255,255,255,0.2); z-index: 10000; background: #000; animation: popIn 0.5s ease; transition: all 0.3s ease; }
-  .local-video-pip.fullscreen { bottom: 0; right: 0; width: 100%; height: 100%; border-radius: 0; border: none; z-index: 9998; }
-  .local-video-pip video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-  .local-video-pip.screen-share video { transform: scaleX(1); object-fit: contain; background: #000; }
-`;
+}
 
-// --- ПЛЕЕР ГОЛОСОВЫХ СООБЩЕНИЙ ---
-const VoiceMessagePlayer = ({ src, isMine, isClone }) => {
-  const audioRef = useRef(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
+const safeText = (val) => {
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number') return String(val);
+  if (val && typeof val === 'object') {
+    if (val.text) return safeText(val.text);
+    if (val.name) return safeText(val.name);
+  }
+  return '[Медиафайл]';
+};
 
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const updateProgress = () => setProgress((audio.currentTime / audio.duration) * 100);
-    const onEnded = () => { setIsPlaying(false); setProgress(0); };
-    audio.addEventListener('timeupdate', updateProgress);
-    audio.addEventListener('ended', onEnded);
-    return () => {
-      audio.removeEventListener('timeupdate', updateProgress);
-      audio.removeEventListener('ended', onEnded);
+const safeReaction = (val) => {
+  if (typeof val === 'string') return val;
+  if (val && typeof val === 'object' && val.reaction) return val.reaction;
+  return '';
+};
+
+const compressImage = (file) => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_SIZE = 800;
+        let w = img.width, h = img.height;
+        if (w > h && w > MAX_SIZE) { h *= MAX_SIZE / w; w = MAX_SIZE; }
+        else if (h > MAX_SIZE) { w *= MAX_SIZE / h; h = MAX_SIZE; }
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
+      };
+      img.src = e.target.result;
     };
+    reader.readAsDataURL(file);
+  });
+};
+
+// ==========================================
+// 2. СТИЛИ И АНИМАЦИИ
+// ==========================================
+const getAuraStyles = (theme) => {
+  const isDark = theme === 'dark' || theme === 'mirror';
+  const isMirror = theme === 'mirror';
+  const isLight = theme === 'light';
+  return `
+  :root { 
+    --aura-red: #FF3B30; 
+    --aura-red-glow: rgba(255, 59, 48, 0.4);
+    --bg-main: ${isMirror ? '#000000' : (isDark ? '#0A0A0C' : '#F2F2F7')};
+    --bg-side: ${isMirror ? 'rgba(15,15,20,0.8)' : (isDark ? '#121214' : '#FFFFFF')};
+    --bg-card: ${isMirror ? 'rgba(25,25,30,0.7)' : (isDark ? '#1C1C22' : '#FFFFFF')};
+    --text-main: ${isLight ? '#000000' : '#FFFFFF'};
+    --text-sec: #8E8E93;
+    --border: ${isLight ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.06)'};
+    --nav-bg: ${isMirror ? 'rgba(0,0,0,0.75)' : (isDark ? 'rgba(17,17,21,0.95)' : 'rgba(255,255,255,0.95)')};
+    --glass: blur(25px) saturate(180%);
+    
+    --bubble-me: ${isDark ? '#2B5278' : '#007AFF'}; 
+    --bubble-me-text: #FFFFFF;
+    --bubble-other: ${isDark ? '#1C1C1E' : '#FFFFFF'};
+    --bubble-other-text: ${isDark ? '#FFFFFF' : '#000000'};
+  }
+  
+  * { box-sizing: border-box; margin: 0; padding: 0; outline: none; -webkit-tap-highlight-color: transparent; }
+  
+  body, html { 
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; 
+    background: var(--bg-main); color: var(--text-main); 
+    overflow: hidden; height: 100vh; width: 100vw;
+    position: fixed; inset: 0; overscroll-behavior: none; 
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+  
+  button { appearance: none !important; -webkit-appearance: none !important; background: transparent; border: none; cursor: pointer; transition: 0.2s; color: inherit; font-family: inherit; }
+  input, textarea, select { appearance: none !important; -webkit-appearance: none !important; font-family: inherit; background: transparent; border: none; color: inherit; outline: none; user-select: text; -webkit-user-select: text; }
+  
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-thumb { background: rgba(150,150,150,0.3); border-radius: 10px; }
+  
+  .aura-viewport { display: flex; width: 100vw; height: 100vh; overflow: hidden; background: var(--bg-main); justify-content: center; position: relative; }
+  
+  .auth-overlay { position: absolute; inset: 0; background: #050505; display: flex; align-items: center; justify-content: center; z-index: 100000; }
+  .auth-card { background: var(--bg-card); border: 1px solid var(--border); padding: 40px; border-radius: 30px; width: 90%; max-width: 380px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.8); animation: fadeUp 0.4s ease; }
+  @keyframes fadeUp { from { opacity:0; transform: translateY(20px); } to { opacity:1; transform: translateY(0); } }
+  
+  .app-container { display: flex; width: 100%; height: 100%; background: var(--bg-main); position: relative; }
+  .sidebar { width: 340px; height: 100%; background: var(--bg-side); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; z-index: 100; transition: 0.3s; }
+  .main-stage { flex: 1; height: 100%; display: flex; justify-content: center; background: var(--bg-main); position: relative; }
+  .chat-wrapper { flex: 1; display: flex; flex-direction: column; height: 100%; background: var(--bg-main); position: relative; border-left: 1px solid var(--border); border-right: 1px solid var(--border); animation: fadeIn 0.3s ease; }
+  .media-panel { width: 320px; background: var(--bg-side); border-left: 1px solid var(--border); display: flex; flex-direction: column; z-index: 90; animation: slideLeft 0.3s ease; }
+  @keyframes slideLeft { from { transform: translateX(100%); } to { transform: translateX(0); } }
+  
+  @media (max-width: 800px) {
+    .sidebar { width: 100%; position: absolute; left: 0; top: 0; }
+    .sidebar.hide { transform: translateX(-100%); }
+    .main-stage { width: 100%; position: absolute; left: 0; top: 0; z-index: 200; }
+    .main-stage.hide { transform: translateX(100%); }
+    .chat-wrapper { border: none; }
+    .media-panel { position: absolute; right: 0; top: 0; height: 100%; z-index: 300; }
+  }
+  
+  .nav-bar { 
+    height: calc(65px + env(safe-area-inset-top)); 
+    padding: env(safe-area-inset-top) 20px 0 20px; 
+    display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); background: var(--nav-bg); backdrop-filter: var(--glass); z-index: 10; flex-shrink: 0; 
+  }
+  .tab-bar { 
+    height: calc(60px + env(safe-area-inset-bottom)); 
+    padding-bottom: calc(15px + env(safe-area-inset-bottom)); 
+    border-top: 1px solid var(--border); display: flex; justify-content: space-around; background: var(--bg-side); flex-shrink: 0; 
+  }
+  .chat-input-wrapper { 
+    padding: 15px 25px calc(30px + env(safe-area-inset-bottom)); 
+    background: var(--bg-card); border-top: 1px solid var(--border); display: flex; gap: 15px; align-items: center; 
+  }
+  .tab-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--text-sec); flex: 1; font-size: 11px; font-weight: 600; }
+  .tab-btn.active { color: var(--aura-red); }
+  .list-item { display: flex; align-items: center; padding: 12px 20px; cursor: pointer; border-bottom: 1px solid var(--border); width: 100%; text-align: left; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
+  .list-item:hover { background: rgba(255,255,255,0.03); }
+  .list-item:active { transform: scale(0.97); }
+  .list-item.active { background: rgba(255,59,48,0.1); border-left: 3px solid var(--aura-red); }
+  .list-item.pinned { background: rgba(255,255,255,0.02); }
+  
+  .avatar { width: 46px; height: 46px; border-radius: 50%; object-fit: cover; background: #222; flex-shrink: 0; }
+  .status-dot { width: 12px; height: 12px; border-radius: 50%; background: #34C759; border: 2px solid var(--bg-side); position: absolute; bottom: 0; right: 0; }
+  
+  /* --- ПЛАВНЫЙ СКРОЛЛ --- */
+  .chat-scroll { flex: 1; overflow-y: auto; padding: 20px 30px; display: flex; flex-direction: column; gap: 8px; user-select: text; touch-action: pan-y; scroll-behavior: smooth; }
+  
+  /* --- ПЛАВНОЕ ПОЯВЛЕНИЕ ПУЗЫРЕЙ СООБЩЕНИЙ --- */
+  .bubble { 
+    max-width: 70%; padding: 10px 14px; border-radius: 18px; font-size: 15px; line-height: 1.45; 
+    position: relative; animation: msgIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; 
+    box-shadow: 0 2px 5px rgba(0,0,0,0.15); cursor: pointer; transition: transform 0.2s ease; 
+  }
+  .bubble:hover { transform: scale(1.01); }
+  .bubble:active { transform: scale(0.98); }
+  
+  @keyframes msgIn { 
+    0% { opacity: 0; transform: translateY(15px) scale(0.9); } 
+    100% { opacity: 1; transform: translateY(0) scale(1); } 
+  }
+  
+  .bubble-me { background: var(--bubble-me); color: var(--bubble-me-text); align-self: flex-end; border-bottom-right-radius: 6px; transform-origin: bottom right; }
+  .bubble-other { background: var(--bubble-other); color: var(--bubble-other-text); align-self: flex-start; border-bottom-left-radius: 6px; border: 1px solid var(--border); transform-origin: bottom left; }
+  
+  /* --- ИНДИКАТОР ПЕЧАТАЕТ... --- */
+  .typing-indicator { display: flex; gap: 6px; padding: 12px 18px; background: var(--bubble-other); border-radius: 18px; width: fit-content; align-self: flex-start; border-bottom-left-radius: 6px; border: 1px solid var(--border); box-shadow: 0 2px 5px rgba(0,0,0,0.05); animation: msgIn 0.3s ease; margin-bottom: 5px; }
+  .typing-dot { width: 8px; height: 8px; background: var(--text-sec); border-radius: 50%; animation: typeBounce 1.4s infinite ease-in-out both; }
+  .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+  .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+  @keyframes typeBounce { 0%, 80%, 100% { transform: scale(0); opacity: 0.4; } 40% { transform: scale(1); opacity: 1; } }
+
+  .file-message { display: flex; align-items: center; gap: 12px; padding: 6px; border-radius: 12px; background: rgba(0,0,0,0.1); transition: 0.2s; cursor: pointer; }
+  .bubble-me .file-message { background: rgba(255,255,255,0.15); }
+  .file-icon { width: 40px; height: 40px; border-radius: 50%; background: var(--aura-red); display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0; }
+  .file-name { font-size: 14px; font-weight: 600; word-break: break-word; }
+  .premium-input { width: 100%; padding: 12px 18px; border-radius: 20px; background: var(--bg-card); color: var(--text-main); font-size: 15px; border: 1px solid var(--border); transition: 0.2s; }
+  .premium-input:focus { border-color: var(--aura-red); }
+  .btn-aura-action { background: var(--aura-red); color: white; padding: 14px; border-radius: 20px; font-weight: 600; width: 100%; font-size: 15px; }
+  .reply-preview { border-left: 3px solid var(--aura-red); padding: 6px 12px; margin-bottom: 8px; background: rgba(0,0,0,0.2); border-radius: 8px; font-size: 13px; opacity: 0.8; }
+  .edit-mode-bar { background: rgba(255,59,48,0.1); border-top: 1px solid var(--border); padding: 10px 25px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--aura-red); font-weight: 600; }
+  
+  .circle-video { width: 240px; height: 240px; border-radius: 50%; overflow: hidden; background: #000; cursor: pointer; position: relative; } 
+  .msg-image { max-width: 280px; border-radius: 12px; cursor: pointer; object-fit: cover; }   
+  .voice-player { display: flex; align-items: center; gap: 12px; min-width: 200px; padding: 4px 0; }
+  .voice-btn { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.15); transition: 0.2s; }
+  .voice-btn:hover { transform: scale(1.1); }
+  .voice-progress { flex: 1; height: 4px; background: rgba(255,255,255,0.3); border-radius: 2px; position: relative; } 
+  .voice-bar { height: 100%; border-radius: 2px; transition: width 0.1s linear; background: white; }
+  .drag-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.85); z-index: 300000; display: flex; align-items: center; justify-content: center; color: white; border: 4px dashed var(--aura-red); flex-direction: column; gap: 20px; backdrop-filter: blur(10px); pointer-events: none; }
+  
+  /* --- КРАСИВЫЙ ДИЗАЙН ЗВОНКА И СВОРАЧИВАНИЕ --- */
+  .call-overlay { position: fixed; inset: 0; background: #050505; z-index: 150000; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; overflow: hidden; transition: all 0.3s ease; }
+  
+  /* Свернутый звонок */
+  .call-overlay.minimized { 
+      inset: auto; top: calc(20px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); 
+      width: auto; height: auto; background: transparent; padding: 0; cursor: pointer; border-radius: 30px; 
+  }
+  
+  .call-video-main { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 5; }
+  .call-video-pip { position: absolute; bottom: 120px; right: 20px; width: 140px; height: 200px; border-radius: 16px; object-fit: cover; border: 2px solid var(--aura-red); z-index: 15; background: #111; box-shadow: 0 10px 30px rgba(0,0,0,0.5); transition: 0.3s ease; }
+  
+  /* Пульсирующий фон звонка */
+  .call-bg-blob { position: absolute; width: 60vw; height: 60vw; max-width: 500px; max-height: 500px; background: radial-gradient(circle, rgba(255,59,48,0.4) 0%, rgba(0,0,0,0) 70%); border-radius: 50%; animation: pulseBlob 4s infinite alternate; z-index: 1; pointer-events: none; }
+  @keyframes pulseBlob { 0% { transform: scale(1); opacity: 0.5; } 100% { transform: scale(1.3); opacity: 0.8; } }
+
+  /* Стеклянный хидер звонка */
+  .call-header-glass { position: absolute; top: calc(60px + env(safe-area-inset-top)); display: flex; flex-direction: column; align-items: center; background: rgba(20,20,25,0.6); backdrop-filter: blur(25px); padding: 40px 60px; border-radius: 40px; border: 1px solid rgba(255,255,255,0.1); z-index: 20; animation: slideDownCall 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+  @keyframes slideDownCall { from { transform: translateY(-50px) scale(0.9); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+  
+  /* Аватарка с расходящимися волнами (Ripple) */
+  .call-avatar-wrapper { position: relative; display: flex; justify-content: center; align-items: center; margin-bottom: 20px; z-index: 2; }
+  .call-avatar-pulse { width: 130px; height: 130px; border-radius: 50%; object-fit: cover; border: 4px solid var(--aura-red); background: #111; position: relative; z-index: 3; }
+  .call-avatar-wrapper.calling::before, .call-avatar-wrapper.calling::after { content: ''; position: absolute; inset: -10px; border-radius: 50%; border: 2px solid var(--aura-red); animation: rippleCall 2s infinite ease-out; z-index: 1; }
+  .call-avatar-wrapper.calling::after { animation-delay: 1s; }
+  @keyframes rippleCall { 0% { transform: scale(0.8); opacity: 1; } 100% { transform: scale(2); opacity: 0; } }
+
+  .call-status-text { font-size: 18px; color: rgba(255,255,255,0.8); margin-top: 10px; font-variant-numeric: tabular-nums; font-weight: 600; letter-spacing: 1px; }
+
+  .call-controls { position: absolute; bottom: calc(30px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 15px; z-index: 20; background: rgba(20,20,25,0.9); padding: 15px 25px; border-radius: 30px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(20px); }
+  .btn-call { width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.15); transition: 0.2s; border: none; cursor: pointer; }
+  .btn-call:hover { transform: scale(1.05); }
+
+  /* Улучшенные выпадающие списки (Наушники и Микрофон) */
+  .device-wrapper { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.6); padding: 8px 16px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); }
+  .call-device-select { background: transparent; color: white; padding: 2px; border: none; outline: none; font-size: 13px; max-width: 140px; text-overflow: ellipsis; cursor: pointer; }
+  .call-device-select option { background: #111; color: white; }
+  
+  /* --- NOTIFICATIONS --- */
+  .aura-toast { 
+    position: fixed; bottom: calc(30px + env(safe-area-inset-bottom)); right: 30px; 
+    background: var(--bg-card); backdrop-filter: var(--glass); border: 1px solid var(--border); 
+    border-radius: 16px; padding: 12px 16px; width: 320px; display: flex; align-items: center; gap: 14px; 
+    z-index: 9999999; box-shadow: 0 10px 40px rgba(0,0,0,0.6); 
+    animation: toastPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); cursor: pointer; 
+  }
+  @keyframes toastPop { 
+    0% { transform: translateX(120%) scale(0.9); opacity: 0; } 
+    70% { transform: translateX(-10px) scale(1.02); opacity: 1; }
+    100% { transform: translateX(0) scale(1); opacity: 1; } 
+  }
+  
+  /* --- CONTEXT MENU & REACTIONS --- */
+  .context-menu { position: fixed; background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; width: 220px; box-shadow: 0 15px 35px rgba(0,0,0,0.6); z-index: 5000; animation: menuPop 0.2s ease; overflow: hidden; }
+  @keyframes menuPop { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .context-item { padding: 12px 16px; display: flex; align-items: center; gap: 12px; width: 100%; color: var(--text-main); font-size: 14px; text-align: left; border-bottom: 1px solid var(--border); }
+  .context-item:hover { background: rgba(255,59,48,0.1); color: var(--aura-red); padding-left: 20px; }
+  
+  .reactions-bar { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .reaction-pill { background: rgba(0,0,0,0.2); padding: 4px 8px; border-radius: 12px; font-size: 12px; border: 1px solid var(--border); }
+  .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; padding: 15px; }
+  
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  `;
+};
+
+// ==========================================
+// КОМПОНЕНТЫ МЕДИА И УВЕДОМЛЕНИЙ
+// ==========================================
+const AuraToast = ({ data, onClose, onClick }) => {
+  useEffect(() => {
+    try {
+      const audio = new Audio(NOTIFICATION_SOUND);
+      audio.play().catch(() => {});
+    } catch(e) {}
+    const timer = setTimeout(onClose, 5000);
+    return () => clearTimeout(timer);
   }, []);
-
-  const togglePlay = (e) => {
-    e?.stopPropagation();
-    if (isClone) return;
-    if (!audioRef.current) return;
-
-    if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
-    } else {
-      audioRef.current.play().then(() => setIsPlaying(true)).catch(err => console.error("Ошибка аудио", err));
-    }
-  };
-
   return (
-      <div style={{display: 'flex', alignItems: 'center', gap: 10, minWidth: 150}}>
-        <button onClick={togglePlay} style={{background: isMine ? 'rgba(255,255,255,0.2)' : 'var(--ios-blue)', borderRadius: '50%', padding: 8, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
-          {isPlaying ? <Pause size={16} color="white" /> : <Play size={16} color="white" style={{marginLeft: 2}} />}
+      <div className="aura-toast" onClick={onClick}>
+        <img src={data.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${safeText(data.name)}`} style={{width:46, height:46, borderRadius:'50%'}} alt="av" />
+        <div style={{flex:1, overflow:'hidden'}}>
+          <b style={{display:'block', fontSize:15, color: 'var(--text-main)', marginBottom:2}}>{safeText(data.name)}</b>
+          <p style={{fontSize:13, opacity:0.8, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{safeText(data.text)}</p>
+        </div>
+        <button onClick={(e) => { e.stopPropagation(); onClose(); }}><X size={18} style={{opacity:0.5}} /></button>
+      </div>
+  );
+};
+
+const VideoCirclePlayer = ({ msg }) => {
+  const videoRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  if (typeof msg.text !== 'string') return <div style={{color:'red', fontSize:12}}>Сбой видео</div>;
+  return (
+      <div className="circle-video" onClick={() => {
+        if(!videoRef.current) return;
+        if(playing) videoRef.current.pause(); else videoRef.current.play();
+        setPlaying(!playing);
+      }}>
+        {!playing && <div style={{position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background: 'rgba(0,0,0,0.3)', zIndex:2}}><Play color="white" size={40} /></div>}
+        <video ref={videoRef} src={msg.text} playsInline loop style={{width:'100%', height:'100%', objectFit:'cover'}} />
+      </div>
+  );
+};
+
+const VoicePlayer = ({ src, isMine }) => {
+  const audioRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [prog, setProg] = useState(0);
+  if (typeof src !== 'string') return <div style={{color:'red', fontSize:12}}>Сбой аудио</div>;
+  useEffect(() => {
+    const a = audioRef.current; if (!a) return;
+    const upd = () => setProg((a.currentTime / (a.duration || 1)) * 100);
+    a.addEventListener('timeupdate', upd);
+    a.addEventListener('ended', () => setPlaying(false));
+    return () => { a.removeEventListener('timeupdate', upd); };
+  }, []);
+  return (
+      <div className="voice-player">
+        <button className="voice-btn" onClick={() => { if(playing) audioRef.current.pause(); else audioRef.current.play(); setPlaying(!playing); }} style={{background: isMine ? 'rgba(255,255,255,0.2)' : 'var(--aura-red)'}}>
+          {playing ? <Pause size={18} color="white" /> : <Play size={18} color="white" style={{marginLeft:2}} />}
         </button>
-        <div style={{flex: 1}}>
-          <audio ref={audioRef} src={src} preload="metadata" />
-          <div
-              style={{height: 4, width: '100%', background: 'rgba(0,0,0,0.2)', borderRadius: 2, cursor: 'pointer', position: 'relative'}}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (isClone || !audioRef.current || !audioRef.current.duration) return;
-                const rect = e.currentTarget.getBoundingClientRect();
-                const clickX = e.clientX - rect.left;
-                audioRef.current.currentTime = (clickX / rect.width) * audioRef.current.duration;
-              }}
-          >
-            <div style={{height: '100%', width: `${progress || 0}%`, background: isMine ? 'white' : 'var(--ios-blue)', borderRadius: 2}}></div>
-          </div>
-          <div style={{fontSize: 11, marginTop: 4, opacity: 0.8}}>Голосовое</div>
+        <div className="voice-progress">
+          <audio ref={audioRef} src={src} />
+          <div className="voice-bar" style={{width:`${prog}%`, background: isMine ? 'white' : 'var(--aura-red)'}} />
         </div>
       </div>
   );
 };
 
-// --- ПЛЕЕР ВИДЕО КРУЖКОВ (С ИНДИКАТОРОМ ЗАГРУЗКИ) ---
-const VideoCirclePlayer = ({ msg, isMine, isClone, onWatched }) => {
-  const videoRef = useRef(null);
-  const [videoUrl, setVideoUrl] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    setIsLoading(true);
-    if (msg.text && msg.text.startsWith('data:')) {
-      fetch(msg.text)
-          .then(res => res.blob())
-          .then(blob => {
-            setVideoUrl(URL.createObjectURL(blob));
-          })
-          .catch(err => {
-            console.error(err);
-            setIsLoading(false);
-          });
-    } else {
-      setVideoUrl(msg.text); // Firebase Storage URL
-    }
-  }, [msg.text]);
-
-  const handleTogglePlay = (e) => {
-    e.stopPropagation();
-    if (isClone) return;
-    if (videoRef.current) {
-      if (videoRef.current.paused) {
-        videoRef.current.play().catch(err => console.error("Ошибка видео", err));
-        if (!msg.watched && !isMine) onWatched(msg.id);
-      } else {
-        videoRef.current.pause();
-      }
-    }
-  };
-
-  return (
-      <div className="circle-video-wrap" onClick={handleTogglePlay}>
-        {isLoading && (
-            <div style={{position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)', zIndex: 5}}>
-              <RefreshCw size={32} color="white" style={{animation: 'spin 1s linear infinite', opacity: 0.8}} />
-            </div>
-        )}
-        <video
-            ref={videoRef}
-            src={videoUrl}
-            playsInline
-            loop={false}
-            preload="metadata"
-            style={{width: '100%', height: '100%', objectFit: 'cover', opacity: isLoading ? 0 : 1, transition: 'opacity 0.3s'}}
-            onLoadedData={() => setIsLoading(false)}
-            onError={() => setIsLoading(false)}
-        />
-        {!isMine && !msg.watched && !isClone && <div className="unread-dot"></div>}
-      </div>
-  );
-};
-
-// 🛡 Броня от фатальных крашей (Error Boundary)
-class ErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error, errorInfo) {
-    console.error("Критический сбой перехвачен ErrorBoundary:", error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', width: '100vw', background: '#000', color: '#FFF', padding: 20, textAlign: 'center', fontFamily: 'sans-serif' }}>
-            <div style={{ background: '#FF3B30', padding: 25, borderRadius: 24, maxWidth: 400, boxShadow: '0 20px 40px rgba(255,59,48,0.3)' }}>
-              <h2 style={{ marginBottom: 10, fontWeight: 800 }}>Сбой интерфейса ⚠️</h2>
-              <p style={{ fontSize: 15, opacity: 0.9, marginBottom: 20 }}>Произошла ошибка при загрузке. Возможно, повреждены данные старой сессии.</p>
-              <code style={{ display: 'block', fontSize: 12, background: 'rgba(0,0,0,0.3)', padding: 10, borderRadius: 10, marginBottom: 20, overflowX: 'auto', textAlign: 'left' }}>
-                {this.state.error?.message || "Неизвестная ошибка"}
-              </code>
-              <button onClick={() => { localStorage.clear(); window.location.reload(); }} style={{ width: '100%', padding: 16, borderRadius: 14, border: 'none', background: '#FFF', color: '#FF3B30', fontWeight: 'bold', fontSize: 16, cursor: 'pointer' }}>
-                Сбросить кэш и восстановить
-              </button>
-            </div>
-          </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-// ОСНОВНОЙ КОМПОНЕНТ
+// ==========================================
+// ГЛАВНЫЙ КОМПОНЕНТ
+// ==========================================
 function MainApp() {
-  const [firebaseUser, setFirebaseUser] = useState(null);
+  const [showUpdate, setShowUpdate] = useState({ active: false, message: '' });
   const [user, setUser] = useState(null);
-  const [isRestoring, setIsRestoring] = useState(true);
-  const [isUploading, setIsUploading] = useState(false);
-
-  const [isDark, setIsDark] = useState(localStorage.getItem('aura_dark') === 'true');
   const [view, setView] = useState('chats');
   const [selectedPeer, setSelectedPeer] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
@@ -313,1461 +376,819 @@ function MainApp() {
   const [callLogs, setCallLogs] = useState([]);
   const [input, setInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [formData, setFormData] = useState({ username: '', password: '', name: '' });
-  const [loading, setLoading] = useState(false);
   const [authStep, setAuthStep] = useState('login');
-  const [globalError, setGlobalError] = useState(null);
+  const [formData, setFormData] = useState({ username: '', password: '', name: '' });
+  const [errorMsg, setErrorMsg] = useState('');
+  const [theme, setTheme] = useState( localStorage .getItem('aura_theme') || 'dark');
+  const [toast, setToast] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null);
+  const [replyTo, setReplyTo] = useState(null);
+  const [editingMsg, setEditingMsg] = useState(null);
+  const [showMediaGallery, setShowMediaGallery] = useState(false);
+  const [galleryTab, setGalleryTab] = useState('image');
 
-  const [mode, setMode] = useState('voice');
   const [isRecording, setIsRecording] = useState(null);
   const [recTime, setRecTime] = useState(0);
-  const [cameraFacing, setCameraFacing] = useState('user');
-  const [isLocked, setIsLocked] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-
-  const [contextMenu, setContextMenu] = useState(null);
-  const [showStickers, setShowStickers] = useState(false);
-  const [forwardMsg, setForwardMsg] = useState(null);
-
-  // --- СОСТОЯНИЯ ЗВОНКА И НАСТРОЕК ---
-  const [activeCall, setActiveCall] = useState(null);
-  const [incomingCall, setIncomingCall] = useState(null);
-  const [callDuration, setCallDuration] = useState(0);
-  const [isMicMuted, setIsMicMuted] = useState(false);
-  const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [showCallSettings, setShowCallSettings] = useState(false);
-
-  // Устройства
-  const [devices, setDevices] = useState({ audioInputs: [], audioOutputs: [] });
-  const [selectedMic, setSelectedMic] = useState('');
-  const [selectedSpeaker, setSelectedSpeaker] = useState('');
-
-  const scrollRef = useRef();
-  const fileInputRef = useRef(null);
-  const avatarInputRef = useRef(null);
-  const mediaRecorder = useRef(null);
-  const videoPreviewRef = useRef(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadState, setUploadState] = useState({ active: false, progress: 0, fileName: '' });
+  const uploadTaskRef = useRef(null);
+  const [previewFile, setPreviewFile] = useState(null);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const mediaRec = useRef(null);
   const audioChunks = useRef([]);
-  const activeStream = useRef(null);
-  const remoteStream = useRef(null);
-  const peerConnection = useRef(null);
-  const callVideoRef = useRef(null);
+  const [timeTick, setTimeTick] = useState(0);
+
+  // Рефы для скролла и печати
+  const scrollRef = useRef();
+  const messagesEndRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
+
+  // WebRTC Звонки
+  const [callSession, setCallSession] = useState(null);
+  const [callDuration, setCallDuration] = useState(0);
+  const [isCallMinimized, setIsCallMinimized] = useState(false); // <-- СВОРАЧИВАНИЕ ЗВОНКА
+
+  const [devices, setDevices] = useState({ audioIn: [], audioOut: [], videoIn: [] });
+  const [selectedDevices, setSelectedDevices] = useState({ audioIn: '', audioOut: '', videoIn: '' });
+  const [callState, setCallState] = useState({ micMuted: false, screenShare: false });
+  const [remoteStreamConnected, setRemoteStreamConnected] = useState(false);
+
+  const pcRef = useRef(null);
+  const localStream = useRef(null);
+  const remoteVideoRef = useRef(null);
   const localVideoRef = useRef(null);
-  const remoteAudioRef = useRef(null);
+  const ringtoneAudio = useRef(null);
 
-  const pressTimer = useRef(null);
-  const callTimer = useRef(null);
-  const isHolding = useRef(false);
-  const lastTapRef = useRef(0);
-
-  // 1. ИНИЦИАЛИЗАЦИЯ PWA (ПОЗВОЛЯЕТ СКАЧАТЬ ПРИЛОЖЕНИЕ КАК ПРОГРАММУ)
+  // 1. ОРИГИНАЛЬНАЯ ИНИЦИАЛИЗАЦИЯ ИЗ ВАШЕГО КОДА
   useEffect(() => {
-    const manifest = {
-      name: "Aura Messenger",
-      short_name: "Aura",
-      start_url: ".",
-      display: "standalone",
-      background_color: isDark ? "#000000" : "#F2F2F7",
-      theme_color: "#007AFF",
-      icons: [{ src: "https://api.dicebear.com/7.x/avataaars/svg?seed=Aura&backgroundColor=007AFF", sizes: "192x192", type: "image/svg+xml" }]
-    };
-    const blob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
-    const manifestURL = URL.createObjectURL(blob);
-    let manifestLink = document.getElementById('aura-manifest');
-    if (!manifestLink) {
-      manifestLink = document.createElement('link');
-      manifestLink.id = 'aura-manifest';
-      manifestLink.rel = 'manifest';
-      document.head.appendChild(manifestLink);
-    }
-    manifestLink.href = manifestURL;
-  }, [isDark]);
+    ringtoneAudio.current = new Audio(RINGTONE_SOUND);
+    ringtoneAudio.current.loop = true;
+    const tickInterval = setInterval(() => setTimeTick(t => t + 1), 20000);
 
-  // 2. ИНИЦИАЛИЗАЦИЯ И ПРОВЕРКА AUTH
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (e) { console.error("Ошибка аутентификации:", e); }
-    };
-    initAuth();
-
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setFirebaseUser(u);
-      if (!u) setIsRestoring(false);
+    onAuthStateChanged(auth, async u => {
+      if (!u) await signInAnonymously(auth);
+      const cachedCreds =  JSON .parse( localStorage .getItem('aura_creds') || '{}');
+      if (cachedCreds.username) {
+        try {
+          const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', cachedCreds.username));
+          if (snap.exists()) setUser(snap.data());
+        } catch (e) {}
+      }
     });
-    return () => unsubscribe();
+
+    const pingPresence = () => {
+      const creds =  JSON .parse( localStorage .getItem('aura_creds') || '{}');
+      if (!creds.username) return;
+      if ( document .visibilityState === 'visible') {
+        if (creds.showLastSeen === false) return;
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', creds.username), {
+          status: 'online',
+          lastActiveTS: Date.now()
+        }).catch(()=>{});
+      }
+    };
+
+    const handleVisibility = () => {
+      const creds =  JSON .parse( localStorage .getItem('aura_creds') || '{}');
+      if (!creds.username) return;
+      if ( document .visibilityState === 'hidden') {
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', creds.username), {
+          status: Date.now(),
+          lastActiveTS: Date.now()
+        }).catch(()=>{});
+      } else {
+        pingPresence();
+      }
+    };
+
+    pingPresence();
+    const pingInterval = setInterval(pingPresence, 20000);
+    document .addEventListener('visibilitychange', handleVisibility);
+    window .addEventListener('pagehide', handleVisibility);
+
+    // --- БЕСШОВНАЯ СИСТЕМА АВТООБНОВЛЕНИЯ ДЛЯ TAURI ---
+    const unsubUpdate = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'system', 'config'), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.forceUpdate === true || data.version > 1) {
+          setShowUpdate({ active: true, message: data.message || 'Доступно обновление. Нажмите для установки.' });
+        } else {
+          setShowUpdate({ active: false, message: '' });
+        }
+      }
+    }, (error) => console.error(error));
+
+    return () => {
+      clearInterval(pingInterval);
+      clearInterval(tickInterval);
+      document .removeEventListener('visibilitychange', handleVisibility);
+      window .removeEventListener('pagehide', handleVisibility);
+      unsubUpdate();
+    };
   }, []);
 
-  // 3. МНОГОУРОВНЕВОЕ ВОССТАНОВЛЕНИЕ СЕССИИ
+  // 2. ОРИГИНАЛЬНЫЕ ПОДПИСКИ ИЗ WORD
   useEffect(() => {
-    if (!firebaseUser) return;
+    if (!auth.currentUser || !user?.username) return;
+    try {
+      const cachedMsgs =  localStorage .getItem('aura_msgs_cache');
+      if (cachedMsgs) setMessages( JSON .parse(cachedMsgs));
+    } catch(e){}
 
-    let mounted = true;
-    const restoreSession = async () => {
-      try {
-        const sessionRef = doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current');
-        const sessionSnap = await getDoc(sessionRef);
+    const unsubU = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), s => {
+      setAllUsers(s.docs.map(d => d.data()));
+    });
 
-        if (sessionSnap.exists() && mounted) {
-          const uName = sessionSnap.data().username;
-          const userSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', uName));
-          if (userSnap.exists() && mounted) {
-            setUser(userSnap.data());
-            localStorage.setItem('aura_user', JSON.stringify(userSnap.data()));
-            return;
+    const unsubM = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), s => {
+      const newMsgs = s.docs.map(d => ({id: d.id, ...d.data()})).sort((a,b) => a. ts  - b. ts );
+      localStorage .setItem('aura_msgs_cache',  JSON .stringify(newMsgs.slice(-150)));
+      if (messages.length > 0 && newMsgs.length > messages.length) {
+        const last = newMsgs[newMsgs.length - 1];
+        if (last.uid !== user.username && (!selectedPeer || selectedPeer.username !== last.uid)) {
+          let txt = last.type === 'text' ? last.text : last.type === 'image' ? ' 📷  Фото' : last.type === 'file' ? ' 📁  Файл' : ' 🎤  Медиа';
+          setToast({ name: last.name, text: txt, avatar: allUsers.find(u => u.username === last.uid)?.avatar, uid: last.uid });
+          if ( document .visibilityState === 'hidden' && 'Notification' in  window  && Notification. permission  === 'granted') {
+            new Notification(last.name, { body: txt, icon: allUsers.find(u => u.username === last.uid)?.avatar });
           }
         }
-
-        const savedCreds = localStorage.getItem('aura_creds');
-        if (savedCreds && mounted) {
-          const { username, password } = JSON.parse(savedCreds);
-          const userSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', username));
-          if (userSnap.exists() && userSnap.data().password === password) {
-            setUser(userSnap.data());
-            await setDoc(sessionRef, { username }).catch(console.error);
-            return;
-          }
-        }
-
-        const cookies = document.cookie.split(';');
-        let cUser = null, cPass = null;
-        for (let c of cookies) {
-          const [k, v] = c.trim().split('=');
-          if (k === 'aura_username') cUser = v;
-          if (k === 'aura_password') cPass = v;
-        }
-        if (cUser && cPass && mounted) {
-          const userSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', cUser));
-          if (userSnap.exists() && userSnap.data().password === cPass) {
-            setUser(userSnap.data());
-            await setDoc(sessionRef, { username: cUser }).catch(console.error);
-            return;
-          }
-        }
-
-        const savedOld = localStorage.getItem('aura_user');
-        if (savedOld && mounted) {
-          const parsed = JSON.parse(savedOld);
-          setUser(parsed);
-          await setDoc(sessionRef, { username: parsed.username }).catch(console.error);
-        }
-
-      } catch (e) {
-        console.error("Ошибка восстановления сессии", e);
-      } finally {
-        if (mounted) setIsRestoring(false);
       }
-    };
+      setMessages(newMsgs);
+    });
 
-    restoreSession();
-  }, [firebaseUser]);
+    const unsubL = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'calls'), s => {
+      const logs = s.docs.map(d => ({id: d.id, ...d.data()}))
+          .filter(c => c.caller === user.username || c.callee === user.username)
+          .sort((a,b) => b. ts  - a. ts );
+      setCallLogs(logs);
+    });
 
-  // ПОДГРУЗКА ДАННЫХ И ОБНОВЛЕНИЕ СТАТУСА ПРОЧТЕНИЯ
-  useEffect(() => {
-    if (!firebaseUser) return;
-
-    const unsubU = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (s) => {
-      const users = s.docs.map(d => ({ id: d.id, ...d.data() }));
-      setAllUsers(users);
-    }, (err) => console.error("Ошибка загрузки пользователей:", err));
-
-    const unsubM = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (s) => {
-      setMessages(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.ts - b.ts));
-    }, (err) => console.error("Ошибка загрузки сообщений:", err));
-
-    const unsubLogs = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_logs'), (s) => {
-      setCallLogs(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.ts - a.ts));
-    }, (err) => console.error("Ошибка загрузки истории вызовов:", err));
-
-    return () => { unsubU(); unsubM(); unsubLogs(); };
-  }, [firebaseUser]);
-
-  useEffect(() => {
-    if (user && allUsers.length > 0) {
-      const me = allUsers.find(u => u.username === user.username);
-      if (me && JSON.stringify(me) !== JSON.stringify(user)) {
-        setUser(me);
-        localStorage.setItem('aura_user', JSON.stringify(me));
-      }
-    }
-  }, [allUsers, user?.username]);
-
-  // АВТОМАТИЧЕСКОЕ ПРОЧТЕНИЕ СООБЩЕНИЙ
-  useEffect(() => {
-    if (view === 'chat_room' && selectedPeer && user) {
-      const unreadMsgs = messages.filter(m => m.to === user.username && m.uid === selectedPeer.username && !m.read);
-      unreadMsgs.forEach(m => {
-        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', m.id), {
-          read: true,
-          readAt: Date.now()
-        }).catch(console.error);
-      });
-    }
-  }, [messages, view, selectedPeer, user]);
-
-  // АВТОМАТИЧЕСКАЯ ПРОКРУТКА ВНИЗ (Scroll to Bottom)
-  useEffect(() => {
-    if (view === 'chat_room') {
-      const timer = setTimeout(() => {
-        if (scrollRef.current) {
-          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [messages, view, selectedPeer]);
-
-  // СПИСОК УСТРОЙСТВ ДЛЯ ЗВОНКА
-  useEffect(() => {
-    if (activeCall) {
-      navigator.mediaDevices.enumerateDevices()
-          .then(devs => {
-            setDevices({
-              audioInputs: devs.filter(d => d.kind === 'audioinput'),
-              audioOutputs: devs.filter(d => d.kind === 'audiooutput')
-            });
-          })
-          .catch(console.error);
-    }
-  }, [activeCall]);
-
-  useEffect(() => {
-    if (isRecording === 'video' && videoPreviewRef.current && activeStream.current) {
-      videoPreviewRef.current.srcObject = activeStream.current;
-    }
-  }, [isRecording, cameraFacing, activeStream.current]);
-
-  useEffect(() => {
-    if (!user) return;
-    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals'), where('callee', '==', user.username), where('status', '==', 'calling'));
-    const unsubCalls = onSnapshot(q, (snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        const data = change.doc.data();
+    // Оригинальная логика входящего звонка из вашего файла
+    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'calls'), where('callee', '==', user.username), where('status', '==', 'calling'));
+    const unsubC = onSnapshot(q, s => {
+      s.docChanges().forEach(change => {
         if (change.type === 'added') {
-          setIncomingCall({ id: change.doc.id, ...data });
+          const data = change.doc.data();
+          const peer = allUsers.find(u => u.username === data.caller) || { name: data.caller };
+          setCallSession({ id: change.doc.id, ...data, peer: peer, isInitiator: false });
+          getMediaDevices();
+          setRemoteStreamConnected(false);
+          setIsCallMinimized(false); // При входящем разворачиваем
+          if(ringtoneAudio.current) ringtoneAudio.current.play().catch(()=>{});
+          if ( document .visibilityState === 'hidden' && 'Notification' in  window  && Notification. permission  === 'granted') {
+            new Notification("Входящий вызов Aura", { body: `Звонит ${peer.name}`, icon: peer.avatar });
+          }
         }
-        if (change.type === 'modified' && data.status !== 'calling') setIncomingCall(null);
-        if (change.type === 'removed') setIncomingCall(null);
       });
-    }, (err) => console.error("Ошибка сигналов вызова:", err));
-    return () => unsubCalls();
-  }, [user?.username]);
+    });
 
+    return () => { unsubU(); unsubM(); unsubC(); unsubL(); };
+  }, [user?.username, selectedPeer?.username, messages.length]);
+
+  // Проверка: "Печатает ли собеседник?"
+  const peerIsTyping = selectedPeer && selectedPeer.username !== 'global' &&
+      allUsers.find(u => u.username === selectedPeer.username)?.typingTo === user?.username;
+
+  // ПЛАВНЫЙ СКРОЛЛ
   useEffect(() => {
-    if (activeCall?.status === 'connected') {
-      if (activeCall.type === 'video') {
-        if (localVideoRef.current && activeStream.current) localVideoRef.current.srcObject = activeStream.current;
-        if (callVideoRef.current && remoteStream.current) callVideoRef.current.srcObject = remoteStream.current;
-      }
-      if (activeCall.type === 'voice') {
-        if (remoteAudioRef.current && remoteStream.current) remoteAudioRef.current.srcObject = remoteStream.current;
+    if (!user || !selectedPeer || messages.length === 0) return;
+    const unread = messages.filter(m => m.to === user.username && m.uid === selectedPeer.username && !m.read);
+    if (unread.length > 0) {
+      unread.forEach(m => { updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', m.id), { read: true }).catch(()=>{}); });
+    }
+    if (messagesEndRef.current) {
+      setTimeout(() => {
+        messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      }, 50);
+    }
+  }, [messages, selectedPeer, user, isUploading, isRecording, peerIsTyping]);
+
+  // ТАЙМЕР РАЗГОВОРА ДЛЯ ЗВОНКА
+  useEffect(() => {
+    let interval;
+    if (callSession && callSession.status === 'active') {
+      interval = setInterval(() => setCallDuration(p => p + 1), 1000);
+    } else {
+      setCallDuration(0);
+    }
+    return () => clearInterval(interval);
+  }, [callSession?.status]);
+
+  // БЕЗОПАСНОЕ ПЕРЕКЛЮЧЕНИЕ НАУШНИКОВ И ДИНАМИКОВ
+  useEffect(() => {
+    if (remoteVideoRef.current && selectedDevices.audioOut) {
+      if (typeof remoteVideoRef.current.setSinkId === 'function') {
+        remoteVideoRef.current.setSinkId(selectedDevices.audioOut).catch(err => {
+          console.warn("Браузер не разрешил переключить динамик:", err);
+        });
       }
     }
-  }, [activeCall?.status, activeCall?.type]);
+  }, [selectedDevices.audioOut, callSession?.status]);
 
-  const showError = (msg) => { setGlobalError(msg); setTimeout(() => setGlobalError(null), 3000); };
+  const getMediaDevices = async () => {
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      setDevices({
+        audioIn: devs.filter(d => d.kind === 'audioinput') || [],
+        audioOut: devs.filter(d => d.kind === 'audiooutput') || [],
+        videoIn: devs.filter(d => d.kind === 'videoinput') || []
+      });
+      if(devs.length) {
+        setSelectedDevices({
+          audioIn: devs.find(d => d.kind === 'audioinput')?.deviceId || '',
+          audioOut: devs.find(d => d.kind === 'audiooutput')?.deviceId || '',
+          videoIn: devs.find(d => d.kind === 'videoinput')?.deviceId || ''
+        });
+      }
+    } catch (e) {}
+  };
 
+  // ОРИГИНАЛЬНЫЙ АВТОРИЗАЦИОННЫЙ БЛОК ИЗ WORD
   const handleAuth = async () => {
     const { username, password, name } = formData;
-    if (!username || !password) return showError("Введите логин и пароль");
-    setLoading(true);
-
+    if (!username || !password) return setErrorMsg("Заполните поля!");
+    setErrorMsg("");
+    const safeU = username.toLowerCase().trim();
+    const uRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', safeU);
     try {
-      const safeUsername = username.toLowerCase().trim();
-
-      if (safeUsername.length < 3) {
-        setLoading(false);
-        return showError("Логин должен быть от 3 символов");
-      }
-      if (authStep === 'reg' && safeUsername.includes(' ')) {
-        setLoading(false);
-        return showError("Новый логин не должен содержать пробелы");
-      }
-
-      const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', safeUsername);
-      const snap = await getDoc(userRef);
-
       if (authStep === 'reg') {
-        if (snap.exists()) { showError("Пользователь уже существует! Войдите."); }
-        else {
-          const newUser = {
-            username: safeUsername, password, name: name || safeUsername,
-            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${safeUsername}`, privacy: 'online', pinnedChats: [], role: 'user'
-          };
-          await setDoc(userRef, newUser);
-          setUser(newUser);
-
-          localStorage.setItem('aura_user', JSON.stringify(newUser));
-          localStorage.setItem('aura_creds', JSON.stringify({ username: safeUsername, password }));
-          document.cookie = `aura_username=${safeUsername}; max-age=31536000; path=/`;
-          document.cookie = `aura_password=${password}; max-age=31536000; path=/`;
-          if (firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current'), { username: safeUsername });
-
-          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
-            text: `${name || safeUsername} перешел в Aura! 🎉`, uid: 'system', to: 'global', ts: Date.now(),
-            name: 'Aura System', type: 'system', hiddenFor: [], isPinned: false, read: true, watched: true, reactions: {}
-          });
-        }
+        const snap = await getDoc(uRef);
+        if (snap.exists()) return setErrorMsg("Логин занят");
+        const newUser = { username: safeU, password, name: name || safeU, avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${safeU}`, status: 'online', showLastSeen: true, ts: Date.now(), pinnedChats: [], hiddenChats: [] };
+        await setDoc(uRef, newUser);
+        setUser(newUser);
       } else {
-        if (snap.exists() && snap.data().password === password) {
-          const userData = snap.data();
-          setUser(userData);
+        const snap = await getDoc(uRef);
+        if (snap.exists() && snap.data().password === password) { setUser(snap.data()); }
+        else return setErrorMsg("Неверный логин или пароль");
+      }
+      localStorage .setItem('aura_creds',  JSON .stringify({username: safeU, password, showLastSeen: true}));
+      updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', safeU), { status: 'online', lastActiveTS: Date.now() }).catch(()=>{});
+    } catch (e) {
+      setErrorMsg("Ошибка сервера");
+    }
+  };
 
-          localStorage.setItem('aura_user', JSON.stringify(userData));
-          localStorage.setItem('aura_creds', JSON.stringify({ username: userData.username, password }));
-          document.cookie = `aura_username=${userData.username}; max-age=31536000; path=/`;
-          document.cookie = `aura_password=${password}; max-age=31536000; path=/`;
-          if (firebaseUser) await setDoc(doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current'), { username: userData.username });
+  const cancelUpload = () => {
+    if (uploadTaskRef.current) {
+      uploadTaskRef.current.abort();
+      uploadTaskRef.current = null;
+    }
+    setUploadState({ active: false, progress: 0, fileName: '' });
+    setIsUploading(false);
+  };
 
+  // ФУНКЦИЯ SUPABASE (исправлено на fetch для избежания ошибки esm.sh в Tauri)
+  async function uploadToSupabase(file) {
+    setUploadState({ active: true, progress: 15, fileName: file.name || 'Медиафайл' });
+    const fileName = `${Date.now()}_${file.name || 'media.webm'}`;
+    setUploadState({ active: true, progress: 45, fileName: file.name || 'Медиафайл' });
+
+    const response = await fetch(`https://fghqfzjphljuosmqzste.supabase.co/storage/v1/object/files/${fileName}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer sb_publishable_VddqU4_ZwSDcaPVvXh4zWA_rc-dHSnq',
+        'apikey': 'sb_publishable_VddqU4_ZwSDcaPVvXh4zWA_rc-dHSnq',
+        'Content-Type': file.type || 'application/octet-stream'
+      },
+      body: file
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      console.error(err);
+      throw new Error(err.message || 'Ошибка загрузки Supabase');
+    }
+
+    setUploadState({ active: true, progress: 85, fileName: file.name || 'Медиафайл' });
+    const publicUrl = `https://fghqfzjphljuosmqzste.supabase.co/storage/v1/object/public/files/${fileName}`;
+    setUploadState({ active: true, progress: 100, fileName: file.name || 'Медиафайл' });
+    return publicUrl;
+  }
+
+  // СКАЧИВАНИЕ ФАЙЛОВ ПРИ КЛИКЕ
+  const handleDownload = async (e, url, fileName) => {
+    e.stopPropagation();
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = blobUrl;
+      a.download = fileName || 'download';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      window.open(url, '_blank'); // Фоллбэк, если fetch запрещен CORS
+    }
+  };
+
+  // ОБРАБОТКА ИНДИКАТОРА "ПЕЧАТАЕТ"
+  const handleTyping = (e) => {
+    setInput(e.target.value);
+    if (selectedPeer && selectedPeer.username !== 'global' && user) {
+      updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.username), { typingTo: selectedPeer.username }).catch(()=>{});
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.username), { typingTo: null }).catch(()=>{});
+      }, 1500);
+    }
+  };
+
+  const sendMessage = async (val = input, type = 'text', blobData = null, ext = '', fileName = '') => {
+    if (previewFile) {
+      const fileToUpload = previewFile;
+      setPreviewFile(null);
+      if (input.trim()) {
+        const targetPeer = selectedPeer ? selectedPeer.username : 'global';
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
+          text: input, fileName: '', uid: user.username, to: targetPeer, ts: Date.now(),
+          name: user.name || 'User', type: 'text', read: false, replyTo: replyTo ? { text: replyTo.text, name: replyTo.name } : null, reactions: {}
+        });
+        setInput('');
+      }
+      setIsUploading(true);
+      try {
+        if (fileToUpload.type.startsWith('image/')) {
+          const compressedBase64 = await compressImage(fileToUpload);
+          await sendMediaMessage(compressedBase64, 'image', fileToUpload.name);
         } else {
-          showError("Неверный логин или пароль!");
+          const url = await uploadToSupabase(fileToUpload);
+          if (url) {
+            const targetPeer = selectedPeer ? selectedPeer.username : 'global';
+            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
+              text: url, fileName: fileToUpload.name, uid: user.username, to: targetPeer, ts: Date.now(),
+              name: user.name || 'User', type: 'file', read: false, replyTo: replyTo ? { text: replyTo.text, name: replyTo.name } : null, reactions: {}
+            });
+          }
         }
+      } catch(e) {
+        if (e.code !== 'storage/canceled') {
+          console .error("Upload error:", e);
+          alert("Ошибка загрузки файла. Проверьте подключение.");
+        }
+      } finally {
+        setIsUploading(false);
+        setUploadState({ active: false, progress: 0, fileName: '' });
+        uploadTaskRef.current = null;
       }
-    } catch (e) {
-      console.error(e);
-      showError("Ошибка соединения с сервером. Попробуйте еще раз.");
+      setReplyTo(null);
+      return;
     }
-    setLoading(false);
-  };
 
-  const handleResetPassword = async () => {
-    const { username, password } = formData;
-    if (!username || !password) return showError("Введите логин и новый пароль");
-    setLoading(true);
+    if (type === 'text' && (!val || typeof val !== 'string' || !val.trim())) return;
+
+    if (editingMsg && type === 'text') {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', editingMsg.id), { text: val, edited: true });
+      setEditingMsg(null); setInput(''); return;
+    }
 
     try {
-      const safeUsername = username.toLowerCase().trim();
-      const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', safeUsername);
-      const snap = await getDoc(userRef);
+      let finalVal = val;
+      const targetPeer = selectedPeer ? selectedPeer.username : 'global';
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
+        text: finalVal, fileName: fileName || '', uid: user.username, to: targetPeer, ts: Date.now(),
+        name: user.name || 'User', type, read: false, replyTo: replyTo ? { text: replyTo.text, name: replyTo.name } : null, reactions: {}
+      });
+      setInput(''); setReplyTo(null); setIsRecording(null);
 
-      if (snap.exists()) {
-        await updateDoc(userRef, { password: password });
-        setGlobalError("✅ Пароль успешно изменен!");
-        setTimeout(() => setAuthStep('login'), 1500);
-      } else {
-        showError("Пользователь с таким логином не найден!");
+      if (selectedPeer && selectedPeer.username !== 'global') {
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.username), { typingTo: null }).catch(()=>{});
+        clearTimeout(typingTimeoutRef.current);
       }
-    } catch (e) {
-      console.error(e);
-      showError("Ошибка соединения с сервером.");
+    } catch (err) {
+      if (err.code !== 'storage/canceled')  console .error("Ошибка sendMessage:", err);
+      setIsUploading(false);
+      setUploadState({ active: false, progress: 0, fileName: '' });
+      uploadTaskRef.current = null;
     }
-    setLoading(false);
   };
 
-  const updateProfile = async (updates) => {
-    if (!user) return;
-    try {
-      const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.username);
-      await updateDoc(userRef, updates);
-    } catch (e) { console.error(e); }
+  const handleDragOver = (e) => { e.preventDefault(); if(selectedPeer) setIsDraggingFile(true); };
+  const handleDragLeave = (e) => { e.preventDefault(); setIsDraggingFile(false); };
+  const handleDrop = async (e) => {
+    e.preventDefault(); setIsDraggingFile(false);
+    if (!selectedPeer) return;
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    setPreviewFile(file);
   };
-
-  const handleAvatarChange = (e) => {
+  const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 250;
-        const scaleSize = MAX_WIDTH / img.width;
-        canvas.width = MAX_WIDTH;
-        canvas.height = img.height * scaleSize;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        updateProfile({ avatar: canvas.toDataURL('image/jpeg', 0.8) });
-      };
-      img.src = event.target.result;
-    };
-    reader.readAsDataURL(file);
+    setPreviewFile(file);
+    e.target.value = '';
+  };
+  const sendMediaMessage = async (urlOrBase64, type, fileName = '') => {
+    const targetPeer = selectedPeer ? selectedPeer.username : 'global';
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
+      text: urlOrBase64, fileName: fileName, uid: user.username, to: targetPeer, ts: Date.now(),
+      name: user.name || 'User', type, read: false, replyTo: replyTo ? { text: replyTo.text, name: replyTo.name } : null, reactions: {}
+    });
+    setReplyTo(null);
   };
 
-  const formatTime = (seconds) => { const m = Math.floor(seconds / 60); const s = seconds % 60; return `${m}:${s < 10 ? '0' : ''}${s}`; };
-
-  const formatTimeOnly = (ts) => {
-    if (!ts) return '';
-    try { return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); } catch(e) { return ''; }
-  };
-
-  // --- ЛОГИКА ОТПРАВКИ И ЗАПИСИ МЕДИА ---
-  const sendMessage = async (val, type = 'text', forwardedFrom = null) => {
-    if (!val.trim() && type === 'text') return;
-    try {
-      setIsUploading(true);
-      let finalVal = val;
-
-      if ((type === 'image' || type === 'voice' || type === 'video_circle') && val.startsWith('data:')) {
-        try {
-          const fileRef = ref(storage, `artifacts/${appId}/public/data/media/${user.username}_${Date.now()}_${Math.random().toString(36).substring(7)}`);
-          await uploadString(fileRef, val, 'data_url');
-          finalVal = await getDownloadURL(fileRef);
-        } catch (storageErr) {
-          console.warn("Storage upload failed, falling back to basic Firestore upload:", storageErr);
-          if (val.length > 950000) {
-            setIsUploading(false);
-            return showError("Файл слишком большой. Разрешите загрузку в Storage (Rules).");
-          }
-        }
-      } else {
-        if (val.length > 950000) {
-          setIsUploading(false);
-          return showError("Текстовое сообщение слишком большое.");
-        }
-      }
-
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
-        text: finalVal, uid: user.username, to: selectedPeer.username, ts: Date.now(),
-        name: user.name || user.username, type, hiddenFor: [], isPinned: false, read: false, watched: false,
-        reactions: {}, forwardedFrom: forwardedFrom
-      });
-
-      setInput(''); setShowStickers(false);
-    } catch (e) {
-      showError("Ошибка отправки.");
-      console.error(e);
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  const getSupportedMimeType = (type) => {
-    if (type === 'video') {
-      const types = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'];
-      for (let t of types) if (MediaRecorder.isTypeSupported(t)) return t;
-      return '';
-    } else {
-      const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac'];
-      for (let t of types) if (MediaRecorder.isTypeSupported(t)) return t;
-      return '';
-    }
-  };
-
+  // ОРИГИНАЛЬНАЯ ЗАПИСЬ ИЗ WORD
   const startMediaRecording = async (type) => {
     try {
-      const constraints = {
-        audio: true,
-        video: type === 'video' ? { facingMode: cameraFacing, width: { ideal: 240 }, height: { ideal: 240 } } : false
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      activeStream.current = stream;
-
-      if (type === 'video' && videoPreviewRef.current) {
-        videoPreviewRef.current.srcObject = stream;
-        videoPreviewRef.current.play().catch(e => console.log(e));
-      }
-
-      const mimeType = getSupportedMimeType(type);
-      const options = mimeType ? { mimeType, videoBitsPerSecond: 250000 } : { videoBitsPerSecond: 250000 };
-
-      mediaRecorder.current = new MediaRecorder(stream, options);
+      const stream = await  navigator .mediaDevices.getUserMedia({ audio: true, video: type === 'video' });
+      mediaRec.current = new MediaRecorder(stream, { mimeType: type === 'video' ? 'video/webm;codecs=vp8' : 'audio/webm;codecs=opus' });
       audioChunks.current = [];
-
-      mediaRecorder.current.ondataavailable = e => { if (e.data.size > 0) audioChunks.current.push(e.data); };
-
-      mediaRecorder.current.onstop = () => {
-        if (mediaRecorder.current.cancelRecord) { stream.getTracks().forEach(t => t.stop()); activeStream.current = null; return; }
-        const fallbackType = type === 'video' ? 'video/webm' : 'audio/webm';
-        const blob = new Blob(audioChunks.current, { type: mimeType || fallbackType });
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          sendMessage(reader.result, type === 'video' ? 'video_circle' : 'voice');
-          stream.getTracks().forEach(t => t.stop()); activeStream.current = null;
-        };
-        reader.readAsDataURL(blob);
-      };
-
-      mediaRecorder.current.start();
-      setIsRecording(type); setRecTime(0); setIsPaused(false);
-
-      mediaRecorder.current.timer = setInterval(() => {
-        setRecTime(p => {
-          if (p >= 59) {
-            stopMediaRecording();
-            return p;
+      mediaRec.current.ondataavailable = e => { if(e.data.size > 0) audioChunks.current.push(e.data); };
+      mediaRec.current.onstop = async () => {
+        const blob = new  Blob (audioChunks.current, { type: type === 'video' ? 'video/webm' : 'audio/webm' });
+        stream.getTracks().forEach(t => t.stop());
+        setIsUploading(true);
+        try {
+          const file = new  File ([blob], type === 'video' ? 'video_message.webm' : 'voice_message.webm', { type: blob.type });
+          const url = await uploadToSupabase(file);
+          await sendMediaMessage(url, type === 'video' ? 'video_circle' : 'voice');
+        } catch (e) {
+          if (e.code !== 'storage/canceled') {
+            console .error("Media upload error", e);
+            alert("Ошибка отправки медиафайла");
           }
-          return p + 1;
-        });
-      }, 1000);
-    } catch (e) { showError("Нет доступа к камере или микрофону"); console.error(e); }
+        } finally {
+          setIsUploading(false);
+        }
+      };
+      mediaRec.current.start();
+      setIsRecording(type); setRecTime(0);
+      const timer = setInterval(() => { setRecTime(p => p + 1); }, 1000);
+      mediaRec.current.timer = timer;
+    } catch (e) {}
   };
-
-  const stopMediaRecording = () => {
-    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
-      mediaRecorder.current.stop();
-      clearInterval(mediaRecorder.current.timer);
-    }
+  const stopMediaRecording = (cancel = false) => {
+    if (!mediaRec.current || mediaRec.current.state === 'inactive') { setIsRecording(null); return; }
+    if (cancel) mediaRec.current.onstop = null;
+    mediaRec.current.stop();
+    clearInterval(mediaRec.current.timer);
     setIsRecording(null);
-    setIsLocked(false);
-    setIsPaused(false);
   };
 
-  const cancelMediaRecording = () => {
-    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
-      mediaRecorder.current.cancelRecord = true;
-      mediaRecorder.current.stop();
-      clearInterval(mediaRecorder.current.timer);
+  const checkIsOnline = (uData) => {
+    if (!uData || uData.showLastSeen === false) return false;
+    if (uData.status === 'online') {
+      if (uData.lastActiveTS && (Date.now() - uData.lastActiveTS > 45000)) return false;
+      return true;
     }
-    setIsRecording(null);
-    setIsLocked(false);
-    setIsPaused(false);
-    isHolding.current = false;
+    return false;
+  };
+  const formatLastSeen = (uData) => {
+    if (!uData || uData.showLastSeen === false) return 'был(а) недавно';
+    if (checkIsOnline(uData)) return 'в сети';
+    const offlineTime = (typeof uData.status === 'number') ? uData.status : (uData.lastActiveTS || Date.now());
+    const diff =  Math .floor((Date.now() - offlineTime) / 60000);
+    if (diff < 1) return 'только что';
+    if (diff < 60) return `${diff} мин. назад`;
+    if (diff < 1440) return `${ Math .floor(diff/60)} ч. назад`;
+    return 'давно';
   };
 
-  const togglePause = () => {
-    if (mediaRecorder.current) {
-      if (mediaRecorder.current.state === 'recording') {
-        mediaRecorder.current.pause();
-        setIsPaused(true);
-        clearInterval(mediaRecorder.current.timer);
-      } else if (mediaRecorder.current.state === 'paused') {
-        mediaRecorder.current.resume();
-        setIsPaused(false);
-        mediaRecorder.current.timer = setInterval(() => setRecTime(p => p + 1), 1000);
+  // --- СТРОГО ОРИГИНАЛЬНЫЙ РАБОЧИЙ WEBRTC ИЗ WORD-ДОКУМЕНТА ---
+  const startCall = async (type, targetPeer = selectedPeer) => {
+    if (!targetPeer) return;
+    await getMediaDevices();
+    const callId = user.username + '_' + Date.now();
+    setCallSession({ id: callId, status: 'calling', peer: targetPeer, type, isInitiator: true });
+    setRemoteStreamConnected(false);
+    setIsCallMinimized(false);
+    try {
+      const peerConnection = new RTCPeerConnection(RTC_SERVERS);
+      pcRef.current = peerConnection;
+      const constraints = { audio: selectedDevices.audioIn ? { deviceId: { exact: selectedDevices.audioIn } } : true, video: type === 'video' };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      localStream.current = stream;
+      setTimeout(() => { if(localVideoRef.current) localVideoRef.current.srcObject = stream; }, 100);
+      stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+      peerConnection.ontrack = event => { if (remoteVideoRef.current) { remoteVideoRef.current.srcObject = event.streams[0]; setRemoteStreamConnected(true); } };
+      const callDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', callId);
+      const callerCandidatesCollection = collection(callDoc, 'callerCandidates');
+      const calleeCandidatesCollection = collection(callDoc, 'calleeCandidates');
+      peerConnection.onicecandidate = event => { if (event.candidate) addDoc(callerCandidatesCollection, event.candidate.toJSON()); };
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      await setDoc(callDoc, { caller: user.username, callee: targetPeer.username, status: 'calling', type, ts: Date.now(), offer: { type: offer.type, sdp: offer.sdp } });
+      onSnapshot(callDoc, snapshot => {
+        const data = snapshot.data();
+        if (!data) return;
+        if (data.status === 'ended' || data.status === 'rejected') { endCall(false); return; }
+        if (data.answer && !peerConnection.currentRemoteDescription) { peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer)).catch(()=>{}); setCallSession(prev => ({ ...prev, status: 'active' })); }
+      });
+      onSnapshot(calleeCandidatesCollection, snapshot => { snapshot.docChanges().forEach(change => { if (change.type === 'added') peerConnection.addIceCandidate(new RTCIceCandidate(change.doc.data())).catch(()=>{}); }); });
+    } catch (e) { endCall(true); }
+  };
+
+  const acceptCall = async () => {
+    if (ringtoneAudio.current) { ringtoneAudio.current.pause(); ringtoneAudio.current.currentTime = 0; }
+    setCallSession(prev => ({ ...prev, status: 'active' }));
+    setRemoteStreamConnected(false);
+    setIsCallMinimized(false);
+    try {
+      const peerConnection = new RTCPeerConnection(RTC_SERVERS);
+      pcRef.current = peerConnection;
+      const constraints = { audio: selectedDevices.audioIn ? { deviceId: { exact: selectedDevices.audioIn } } : true, video: callSession.type === 'video' };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      localStream.current = stream;
+      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+      stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+      peerConnection.ontrack = event => { if (remoteVideoRef.current) { remoteVideoRef.current.srcObject = event.streams[0]; setRemoteStreamConnected(true); } };
+      const callDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', callSession.id);
+      const callerCandidatesCollection = collection(callDoc, 'callerCandidates');
+      const calleeCandidatesCollection = collection(callDoc, 'calleeCandidates');
+      peerConnection.onicecandidate = event => { if (event.candidate) addDoc(calleeCandidatesCollection, event.candidate.toJSON()); };
+      const callData = (await getDoc(callDoc)).data();
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(callData.offer));
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      await updateDoc(callDoc, { status: 'active', answer: { type: answer.type, sdp: answer.sdp } });
+      onSnapshot(callDoc, snapshot => { if (snapshot.data()?.status === 'ended' || snapshot.data()?.status === 'rejected') endCall(false); });
+      onSnapshot(callerCandidatesCollection, snapshot => { snapshot.docChanges().forEach(change => { if (change.type === 'added') peerConnection.addIceCandidate(new RTCIceCandidate(change.doc.data())).catch(()=>{}); }); });
+    } catch (e) { endCall(true); }
+  };
+
+  const endCall = async (updateDb = true) => {
+    if (ringtoneAudio.current) { ringtoneAudio.current.pause(); ringtoneAudio.current.currentTime = 0; }
+    if (localStream.current) localStream.current.getTracks().forEach(t => t.stop());
+    if (pcRef.current) pcRef.current.close();
+    if (updateDb && callSession?.id) {
+      const newStatus = callSession.status === 'calling' && !callSession.isInitiator ? 'rejected' : 'ended';
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'calls', callSession.id), { status: newStatus }).catch(()=>{});
+    }
+    setCallSession(null); setRemoteStreamConnected(false); setCallDuration(0); setIsCallMinimized(false);
+  };
+
+  const toggleMic = () => {
+    if (localStream.current) {
+      const audioTrack = localStream.current.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setCallState(prev => ({ ...prev, micMuted: !audioTrack.enabled }));
       }
-    }
-  };
-
-  const flipCamera = async (e) => {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
-    const nextFacing = cameraFacing === 'user' ? 'environment' : 'user';
-    setCameraFacing(nextFacing);
-
-    if (isRecording === 'video' && activeStream.current) {
-      try {
-        const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: nextFacing } });
-        const newVideoTrack = newStream.getVideoTracks()[0];
-        const oldVideoTrack = activeStream.current.getVideoTracks()[0];
-
-        if (oldVideoTrack) {
-          activeStream.current.removeTrack(oldVideoTrack);
-          oldVideoTrack.stop();
-        }
-        activeStream.current.addTrack(newVideoTrack);
-
-        if (videoPreviewRef.current) {
-          videoPreviewRef.current.srcObject = null;
-          videoPreviewRef.current.srcObject = activeStream.current;
-          videoPreviewRef.current.play().catch(e => console.log(e));
-        }
-      } catch (err) { console.error("Ошибка переворота камеры", err); }
-    }
-  };
-
-  const handlePointerDown = (e) => {
-    if (isRecording) return;
-    isHolding.current = false;
-    pressTimer.current = setTimeout(() => {
-      isHolding.current = true;
-      setIsLocked(true);
-      startMediaRecording(mode);
-    }, 200);
-  };
-
-  const handlePointerUp = (e) => {
-    clearTimeout(pressTimer.current);
-    if (isLocked && isRecording) return;
-
-    if (!isHolding.current && !isRecording) {
-      setMode(prev => prev === 'voice' ? 'video' : 'voice');
-    }
-    isHolding.current = false;
-  };
-
-  const toggleMicCall = () => {
-    if (activeStream.current) {
-      const audioTracks = activeStream.current.getAudioTracks();
-      audioTracks.forEach(t => t.enabled = isMicMuted);
-      setIsMicMuted(!isMicMuted);
     }
   };
 
   const toggleScreenShare = async () => {
     try {
-      if (!isScreenSharing) {
+      if (!callState.screenShare) {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        const screenTrack = screenStream.getVideoTracks()[0];
-
-        const sender = peerConnection.current.getSenders().find(s => s.track?.kind === 'video');
-        if (sender) sender.replaceTrack(screenTrack);
-
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = screenStream;
-        }
-
-        screenTrack.onended = () => {
-          toggleScreenShare();
+        if (localVideoRef.current) localVideoRef.current.srcObject = screenStream;
+        const videoTrack = screenStream.getVideoTracks()[0];
+        const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'video');
+        if (sender) sender.replaceTrack(videoTrack);
+        setCallState(prev => ({ ...prev, screenShare: true }));
+        videoTrack.onended = async () => {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          const vTrack = stream.getVideoTracks()[0];
+          if (sender) sender.replaceTrack(vTrack);
+          if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+          setCallState(prev => ({ ...prev, screenShare: false }));
         };
-        setIsScreenSharing(true);
       } else {
-        const camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-        const camTrack = camStream.getVideoTracks()[0];
-
-        const sender = peerConnection.current.getSenders().find(s => s.track?.kind === 'video');
-        if (sender) sender.replaceTrack(camTrack);
-
-        const oldTrack = activeStream.current.getVideoTracks().find(t => t.kind === 'video');
-        if (oldTrack) {
-          activeStream.current.removeTrack(oldTrack);
-          oldTrack.stop();
-        }
-        activeStream.current.addTrack(camTrack);
-
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = activeStream.current;
-        }
-        setIsScreenSharing(false);
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+        const videoTrack = stream.getVideoTracks()[0];
+        const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'video');
+        if (sender) sender.replaceTrack(videoTrack);
+        setCallState(prev => ({ ...prev, screenShare: false }));
       }
     } catch (e) {
-      console.error("Ошибка при захвате экрана", e);
+      console.error(e);
     }
   };
 
-  const changeMic = async (deviceId) => {
-    setSelectedMic(deviceId);
-    try {
-      const newStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } });
-      const newTrack = newStream.getAudioTracks()[0];
-      const sender = peerConnection.current.getSenders().find(s => s.track?.kind === 'audio');
-      if (sender) sender.replaceTrack(newTrack);
-
-      const oldTrack = activeStream.current.getAudioTracks()[0];
-      if(oldTrack) { activeStream.current.removeTrack(oldTrack); oldTrack.stop(); }
-      activeStream.current.addTrack(newTrack);
-    } catch(e) { console.error(e); }
+  const togglePinChat = async (peerU) => {
+    const pinned = user.pinnedChats || [];
+    const newPinned = pinned.includes(peerU) ? pinned.filter(u => u !== peerU) : [...pinned, peerU];
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.username), { pinnedChats: newPinned });
+    setUser({...user, pinnedChats: newPinned});
   };
 
-  const changeSpeaker = async (deviceId) => {
-    setSelectedSpeaker(deviceId);
-    if (remoteAudioRef.current && typeof remoteAudioRef.current.setSinkId !== 'undefined') {
-      try { await remoteAudioRef.current.setSinkId(deviceId); } catch(e) { console.error("setSinkId error", e); }
-    }
-    if (callVideoRef.current && typeof callVideoRef.current.setSinkId !== 'undefined') {
-      try { await callVideoRef.current.setSinkId(deviceId); } catch(e) { console.error("setSinkId error", e); }
-    }
-  };
-
-  const startCall = async (type) => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: type === 'video' ? { facingMode: 'user' } : false });
-      activeStream.current = stream;
-      const pc = new RTCPeerConnection(rtcServers);
-      peerConnection.current = pc;
-
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-      pc.ontrack = (event) => {
-        remoteStream.current = event.streams[0];
-        if (callVideoRef.current && type === 'video') callVideoRef.current.srcObject = event.streams[0];
-        if (remoteAudioRef.current && type === 'voice') remoteAudioRef.current.srcObject = event.streams[0];
-      };
-
-      const callDocRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals'));
-      const callId = callDocRef.id;
-
-      const candidateQueue = [];
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'callerCandidates'), event.candidate.toJSON());
-        }
-      };
-
-      const offerDescription = await pc.createOffer();
-      await pc.setLocalDescription(offerDescription);
-
-      await setDoc(callDocRef, {
-        caller: user.username, callee: selectedPeer.username, type,
-        offer: { type: offerDescription.type, sdp: offerDescription.sdp },
-        status: 'calling', ts: Date.now()
-      });
-
-      setActiveCall({ id: callId, type, peer: selectedPeer, status: 'calling', isCaller: true });
-
-      onSnapshot(callDocRef, async (snapshot) => {
-        const data = snapshot.data();
-        if (!data) return;
-        if (data.answer && !pc.currentRemoteDescription) {
-          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-          setActiveCall(prev => ({...prev, status: 'connected'}));
-          callTimer.current = setInterval(() => setCallDuration(p => p + 1), 1000);
-
-          candidateQueue.forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(console.error));
-        }
-        if (data.status === 'ended' || data.status === 'declined') endCallLocal();
-      }, (err) => console.error("Ошибка активного звонка:", err));
-
-      onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'calleeCandidates'), (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added') {
-            const candidate = change.doc.data();
-            if (pc.remoteDescription) {
-              pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(console.error);
-            } else {
-              candidateQueue.push(candidate);
-            }
-          }
-        });
-      }, (err) => console.error("Ошибка ICE (получатель):", err));
-    } catch (e) { showError("Нет доступа к камере/микрофону для звонка"); }
-  };
-
-  const answerCall = async () => {
-    if (!incomingCall) return;
-    const { id: callId, type, offer, peer } = incomingCall;
-    setIncomingCall(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: type === 'video' ? { facingMode: 'user' } : false });
-      activeStream.current = stream;
-      const pc = new RTCPeerConnection(rtcServers);
-      peerConnection.current = pc;
-
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-      pc.ontrack = (event) => {
-        remoteStream.current = event.streams[0];
-        if (callVideoRef.current && type === 'video') callVideoRef.current.srcObject = event.streams[0];
-        if (remoteAudioRef.current && type === 'voice') remoteAudioRef.current.srcObject = event.streams[0];
-      };
-
-      const callDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId);
-
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'calleeCandidates'), event.candidate.toJSON());
-        }
-      };
-
-      const answerDescription = await pc.createAnswer();
-      await pc.setLocalDescription(answerDescription);
-
-      await updateDoc(callDocRef, { answer: { type: answerDescription.type, sdp: answerDescription.sdp }, status: 'connected' });
-      setActiveCall({ id: callId, type, peer, status: 'connected', isCaller: false });
-      callTimer.current = setInterval(() => setCallDuration(p => p + 1), 1000);
-
-      onSnapshot(callDocRef, (snapshot) => {
-        if (snapshot.data()?.status === 'ended') endCallLocal();
-      }, (err) => console.error("Ошибка ответа на звонок:", err));
-
-      onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'call_signals', callId, 'callerCandidates'), (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added') pc.addIceCandidate(new RTCIceCandidate(change.doc.data())).catch(console.error);
-        });
-      }, (err) => console.error("Ошибка ICE (звонящий):", err));
-    } catch (e) { showError("Ошибка при ответе на звонок"); }
-  };
-
-  const declineCall = async () => {
-    if (!incomingCall) return;
-    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'call_signals', incomingCall.id), { status: 'declined' });
-    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_logs'), {
-      caller: incomingCall.caller, callee: user.username, type: incomingCall.type, status: 'missed', ts: Date.now(), duration: 0
-    });
-    setIncomingCall(null);
-  };
-
-  const endCall = async () => {
-    if (activeCall) {
-      const status = activeCall.status === 'calling' ? 'missed' : 'ended';
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'call_signals', activeCall.id), { status: 'ended' });
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'call_logs'), {
-        caller: activeCall.isCaller ? user.username : activeCall.peer.username,
-        callee: activeCall.isCaller ? activeCall.peer.username : user.username,
-        type: activeCall.type, status: status, ts: Date.now(), duration: callDuration
-      });
-    }
-    endCallLocal();
-  };
-
-  const endCallLocal = () => {
-    if (peerConnection.current) { peerConnection.current.close(); peerConnection.current = null; }
-    if (activeStream.current) { activeStream.current.getTracks().forEach(t => t.stop()); activeStream.current = null; }
-    setActiveCall(null); setCallDuration(0); clearInterval(callTimer.current);
-    setIsMicMuted(false); setIsScreenSharing(false); setShowCallSettings(false);
-  };
-
-  const handleReaction = async (emoji, e) => {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
-
-    if (!contextMenu || contextMenu.type !== 'message') return;
-    const msg = contextMenu.item;
-    const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'messages', msg.id);
-    const currentReactions = { ...(msg.reactions || {}) };
-
-    if (currentReactions[user.username] === emoji) {
-      delete currentReactions[user.username];
+  const deleteDialog = async (peerU, both) => {
+    if (both) {
+      messages.filter(m => (m.uid === user.username && m.to === peerU) || (m.uid === peerU && m.to === user.username))
+          .forEach(m => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', m.id)));
     } else {
-      currentReactions[user.username] = emoji;
+      const hidden = user.hiddenChats || [];
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.username), { hiddenChats: [...hidden, peerU] });
+      setUser({...user, hiddenChats: [...hidden, peerU]});
     }
-
-    await updateDoc(msgRef, { reactions: currentReactions }).catch(console.error);
-    closeContextMenu();
+    setSelectedPeer(null);
   };
 
-  const handleDoubleTap = (e, m) => {
-    const now = Date.now();
-    if (now - lastTapRef.current < 300) {
-      e.preventDefault();
-      const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'messages', m.id);
-      const currentReactions = { ...(m.reactions || {}) };
-      if (currentReactions[user.username]) {
-        delete currentReactions[user.username];
-      } else {
-        currentReactions[user.username] = '❤️';
-      }
-      updateDoc(msgRef, { reactions: currentReactions }).catch(console.error);
-    }
-    lastTapRef.current = now;
-  };
+  if (!user) return (
+      <div className="aura-viewport"><style>{getAuraStyles(theme)}</style><div className="auth-overlay"><div className="auth-card">
+        <div className="logo-box"><Zap size={45} color="white" fill="white" /></div>
+        <h1 style={{color:'white', fontSize:38, fontWeight:900, marginBottom:8}}>AURA</h1>
+        <p style={{color:'#777', fontSize:15, marginBottom:40}}>Безопасность. Стиль. Будущее.</p>
+        <div style={{width:'100%'}}>
+          <input className="premium-input" placeholder="Логин" value={formData.username} onChange={e=>setFormData({...formData, username:e.target.value})} style={{marginBottom:12}} />
+          <input className="premium-input" type="password" placeholder="Пароль" value={formData.password} onChange={e=>setFormData({...formData, password:e.target.value})} style={{marginBottom:12}} />
+          {authStep === 'reg' && <input className="premium-input" placeholder="Отображаемое имя" value={formData.name} onChange={e=>setFormData({...formData, name:e.target.value})} style={{marginBottom:12}} />}
+          {errorMsg && <p style={{color:'var(--aura-red)', marginBottom:12, fontSize:14}}>{errorMsg}</p>}
+          <button className="btn-aura-action" onClick={handleAuth}>{authStep === 'login' ? 'ВОЙТИ В СИСТЕМУ' : 'СОЗДАТЬ АККАУНТ'}</button>
+          <button onClick={()=>{setAuthStep(authStep==='login'?'reg':'login'); setErrorMsg("")}} style={{marginTop:20, color:'var(--aura-red)', fontWeight:800, fontSize:14}}>{authStep === 'login' ? 'У меня ещё нет аккаунта' : 'Уже есть аккаунт? Войти'}</button>
+        </div></div></div></div>
+  );
 
-  const openContextMenu = (e, item, type) => {
-    e.preventDefault(); e.stopPropagation();
-    const rect = e.currentTarget.getBoundingClientRect();
-    setContextMenu({ item, type, rect });
-  };
+  const sortedUsers = [...allUsers]
+      .filter(u => u.username !== user?.username && !(user?.hiddenChats || []).includes(u.username) && u.name.toLowerCase().includes(searchQuery.toLowerCase()))
+      .sort((a,b) => {
+        const aPin = user?.pinnedChats?.includes(a.username) ? 1 : 0;
+        const bPin = user?.pinnedChats?.includes(b.username) ? 1 : 0;
+        return bPin - aPin;
+      });
 
-  const closeContextMenu = () => setContextMenu(null);
+  const chatMessages = messages.filter(m => (selectedPeer?.username==='global'?m.to==='global':((m.uid===user?.username && m.to===selectedPeer?.username)||(m.uid===selectedPeer?.username && m.to===user?.username))));
+  const pinnedMsg = chatMessages.find(m => m.isPinned);
 
-  // 🛡 УДАЛЕНИЕ СООБЩЕНИЙ С ПРОВЕРКОЙ ПРАВ АДМИНА
-  const deleteMessage = async (deleteType, e) => {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
-    if (!contextMenu || contextMenu.type !== 'message') return;
-
-    const msgId = contextMenu.item.id;
-    const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId);
-
-    try {
-      if (deleteType === 'both') {
-        // Если это мое сообщение ИЛИ я администратор
-        if (contextMenu.item.uid === user.username || user.role === 'admin') {
-          await deleteDoc(msgRef);
-        }
-      } else {
-        const currentHidden = contextMenu.item.hiddenFor || [];
-        await updateDoc(msgRef, { hiddenFor: [...currentHidden, user.username] });
-      }
-    } catch (err) { console.error("Delete Error", err); }
-    closeContextMenu();
-  };
-
-  const getLastMessage = (peerUsername) => {
-    if (peerUsername === 'global') {
-      const globalMsgs = messages.filter(m => m.to === 'global' && !(m.hiddenFor || []).includes(user.username));
-      return globalMsgs.length > 0 ? globalMsgs[globalMsgs.length - 1] : null;
-    }
-    const chatMsgs = messages.filter(m =>
-        ((m.uid === user.username && m.to === peerUsername) || (m.uid === peerUsername && m.to === user.username)) &&
-        !(m.hiddenFor || []).includes(user.username)
-    );
-    return chatMsgs.length > 0 ? chatMsgs[chatMsgs.length - 1] : null;
-  };
-
-  const getMessagePreview = (msg) => {
-    if (!msg) return "";
-    if (msg.type === 'text' || msg.type === 'system') return msg.text || '';
-    if (msg.type === 'voice') return '🎤 Голосовое сообщение';
-    if (msg.type === 'video_circle') return '📹 Видеосообщение';
-    if (msg.type === 'image') return '🖼 Фотография';
-    if (msg.type === 'sticker') return '✨ Стикер';
-    return 'Вложение';
-  };
-
-  const togglePinMessage = async (e) => {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
-    if (!contextMenu || contextMenu.type !== 'message') return;
-    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', contextMenu.item.id), { isPinned: !contextMenu.item.isPinned });
-    closeContextMenu();
-  };
-
-  const togglePinChat = async (e) => {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
-    if (!contextMenu || contextMenu.type !== 'chat') return;
-    const peerUsername = contextMenu.item.username;
-    const currentPinned = user.pinnedChats || [];
-    const isPinned = currentPinned.includes(peerUsername);
-    const newPinned = isPinned ? currentPinned.filter(u => u !== peerUsername) : [...currentPinned, peerUsername];
-    await updateProfile({ pinnedChats: newPinned });
-    closeContextMenu();
-  };
-
-  const handleForwardStart = (e) => {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
-    setForwardMsg(contextMenu.item);
-    setView('chats');
-    closeContextMenu();
-  };
-
-  const filteredUsers = allUsers.filter(u => u.username !== user.username).filter(u => {
-    if (!searchQuery) return true;
-    const lowerQ = searchQuery.toLowerCase().replace('@', '').trim();
-    return (u.name || '').toLowerCase().includes(lowerQ) || (u.username || '').toLowerCase().includes(lowerQ);
-  });
-
-  const sortedUsers = [...filteredUsers].sort((a, b) => {
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase().replace('@', '').trim();
-      const aExact = a.username?.toLowerCase() === q || a.name?.toLowerCase() === q;
-      const bExact = b.username?.toLowerCase() === q || b.name?.toLowerCase() === q;
-      if (aExact && !bExact) return -1;
-      if (!aExact && bExact) return 1;
-
-      const aStarts = a.username?.toLowerCase().startsWith(q) || a.name?.toLowerCase().startsWith(q);
-      const bStarts = b.username?.toLowerCase().startsWith(q) || b.name?.toLowerCase().startsWith(q);
-      if (aStarts && !bStarts) return -1;
-      if (!aStarts && bStarts) return 1;
-    }
-
-    const aPin = user.pinnedChats?.includes(a.username); const bPin = user.pinnedChats?.includes(b.username);
-    if (aPin && !bPin) return -1; if (!aPin && bPin) return 1;
-    const timeA = getLastMessage(a.username)?.ts || 0; const timeB = getLastMessage(b.username)?.ts || 0;
-    return timeB - timeA;
-  });
-
-  const myCallLogs = callLogs.filter(l => l.caller === user.username || l.callee === user.username);
-
-  const currentMessages = messages.filter(m => {
-    if (!selectedPeer) return false;
-    if (m.hiddenFor && m.hiddenFor.includes(user.username)) return false;
-    if (selectedPeer.username === 'global') return m.to === 'global';
-    return (m.uid === user.username && m.to === selectedPeer.username) || (m.uid === selectedPeer.username && m.to === user.username);
-  });
-
-  const renderMessageContent = (m, isClone = false) => {
-    if (m.type === 'system') return <div key={m.id} className="system-bubble" style={{ margin: isClone ? 0 : '10px 0' }}>{m.text}</div>;
-    const isMine = m.uid === user.username;
-    const isSticker = m.type === 'sticker';
-    const isImage = m.type === 'image';
-    const isCircle = m.type === 'video_circle';
-    const isAdmin = user?.role === 'admin';
-
-    let contentStyle = { padding: isImage || isSticker || isCircle ? 0 : '8px 12px', background: isImage || isSticker || isCircle ? 'transparent' : '', boxShadow: isImage || isSticker || isCircle ? 'none' : '' };
-    if (isClone) contentStyle.margin = 0;
-
-    return (
-        <div className={`chat-bubble ${isMine ? 'bubble-me' : 'bubble-other'}`} style={contentStyle}
-             onContextMenu={!isClone ? (e) => openContextMenu(e, m, 'message') : undefined}
-             onTouchStart={!isClone ? (e) => { pressTimer.current = setTimeout(() => openContextMenu(e, m, 'message'), 500); } : undefined}
-             onClick={!isClone ? (e) => handleDoubleTap(e, m) : undefined}
-             onTouchEnd={!isClone ? () => clearTimeout(pressTimer.current) : undefined}
-             onTouchMove={!isClone ? () => clearTimeout(pressTimer.current) : undefined}
-        >
-          {m.forwardedFrom && <div style={{fontSize: 12, color: isMine ? 'rgba(255,255,255,0.8)' : 'var(--ios-blue)', marginBottom: 4, display: 'flex', alignItems: 'center'}}><Forward size={12} className="mr-1"/> Переслано от {m.forwardedFrom}</div>}
-
-          {selectedPeer?.username === 'global' && !isMine && (
-              <div style={{
-                fontSize: 12, fontWeight: 700, marginBottom: (isCircle || isImage || isSticker) ? 4 : 2,
-                color: (isImage || isSticker || isCircle) ? '#FFF' : 'var(--ios-blue)',
-                background: (isImage || isSticker || isCircle) ? 'rgba(0,0,0,0.5)' : 'transparent',
-                padding: (isImage || isSticker || isCircle) ? '4px 8px' : 0,
-                borderRadius: 10, display: 'inline-block', position: 'relative', zIndex: 10
-              }}>
-                {m.name || 'User'} {isAdmin && <span style={{opacity: 0.5, marginLeft: 5}}>@{m.uid}</span>}
-              </div>
-          )}
-
-          {isCircle ? (
-              <VideoCirclePlayer msg={m} isMine={isMine} isClone={isClone} onWatched={(id) => updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', id), { watched: true }).catch(console.error)} />
-          ) : m.type === 'voice' ? (
-              <VoiceMessagePlayer src={m.text || ''} isMine={isMine} isClone={isClone} />
-          ) : isImage ? (
-              <img src={m.text || ''} className="attachment-img" alt="вложение" />
-          ) : isSticker ? (
-              <img src={m.text || ''} className="sticker-img-3d" alt="3d стикер" />
-          ) : (
-              <div>{m.text || ''}</div>
-          )}
-
-          <div style={{fontSize: 10, opacity: 0.7, textAlign: 'right', marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3, position: isImage || isSticker || isCircle ? 'absolute' : 'relative', bottom: isImage || isSticker || isCircle ? 10 : 0, right: isImage || isSticker || isCircle ? (isCircle ? 30 : 10) : 0, background: isImage || isSticker || isCircle ? 'rgba(0,0,0,0.4)' : 'none', color: isImage || isSticker || isCircle ? 'white' : 'inherit', padding: isImage || isSticker || isCircle ? '2px 8px' : 0, borderRadius: 10}}>
-            {m.isPinned && <Pin size={10} style={{marginRight: 2}} />}
-            {formatTimeOnly(m.ts)}
-
-            {isMine && selectedPeer?.username !== 'global' && (
-                <span style={{marginLeft: 4, color: m.read ? '#34C759' : 'inherit', display: 'flex', alignItems: 'center', gap: 2}}>
-              {m.read ? (
-                  <>✓✓ {m.readAt && <span style={{fontSize: 9, opacity: 0.8}}>{formatTimeOnly(m.readAt)}</span>}</>
-              ) : '✓'}
-            </span>
+  return (
+      <div className="aura-viewport" onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+        <style>{getAuraStyles(theme)}</style>
+        {isDraggingFile && (<div className="drag-overlay"><Download size={60} color="var(--aura-red)" /><h2 style={{fontSize: 24, fontWeight: 700}}>Отпустите файл для отправки</h2></div>)}
+        <div className="app-container">
+          <div className={`sidebar ${selectedPeer && (view === 'chats' || view === 'calls') ? 'hide' : ''}`}>
+            <div className="nav-bar">
+              <div style={{display:'flex', alignItems:'center', gap:12}}><Zap size={28} color="var(--aura-red)" fill="var(--aura-red)" /><h2 style={{fontWeight:900, fontSize:24}}>Aura</h2></div>
+              <Bell size={20} color="var(--aura-red)" style={{cursor:'pointer'}} />
+            </div>
+            {view === 'chats' && (
+                <div style={{flex:1, display:'flex', flexDirection:'column', overflow:'hidden'}}>
+                  <div style={{padding:16}}><div className="premium-input" style={{display:'flex', alignItems:'center', gap:10, padding:'10px 16px', borderRadius: 16}}><Search size={18} color="#8E8E93" /><input style={{width:'100%'}} placeholder="Поиск в Aura..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} /></div></div>
+                  <div style={{flex:1, overflowY:'auto'}}>
+                    <button className={`list-item ${selectedPeer?.username === 'global' ? 'active' : ''}`} onClick={() => setSelectedPeer({username:'global', name:'Общий чат', avatar:''})}><div style={{width:48, height:48, borderRadius:16, background:'var(--aura-red)', display:'flex', alignItems:'center', justifyContent:'center', marginRight:16, flexShrink:0}}><Globe size={24} color="white" /></div><div style={{flex:1}}><b>Общий чат</b><p style={{fontSize:13, opacity:0.6, margin:0}}>Весь мир Aura</p></div></button>
+                    {sortedUsers.map(u => {
+                      const unreadCount = messages.filter(m => m.uid === u.username && m.to === user.username && !m.read).length;
+                      return (
+                          <button key={u.username} className={`list-item ${selectedPeer?.username === u.username ? 'active' : ''} ${user.pinnedChats?.includes(u.username)?'pinned':''}`} onClick={() => setSelectedPeer(u)} onContextMenu={(e)=>{ e.preventDefault(); setContextMenu({type:'user', item:u, rect:e.currentTarget.getBoundingClientRect()}); }}>
+                            <div style={{position:'relative'}}><img src={safeText(u.avatar)} className="avatar" alt="av" />{checkIsOnline(u) && <div className="status-dot" />}</div>
+                            <div style={{flex:1, overflow:'hidden', display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 12}}><div style={{display:'flex', justifyContent:'space-between', alignItems: 'center'}}><b style={{fontSize:15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text-main)'}}>{safeText(u.name)}</b><div style={{display: 'flex', alignItems: 'center', gap: 6}}>{unreadCount > 0 && <span style={{background:'#34C759', color:'white', padding:'2px 7px', borderRadius:10, fontSize:11, fontWeight:800}}>{unreadCount}</span>}{user.pinnedChats?.includes(u.username) && <Pin size={12} color="var(--text-sec)" />}</div></div><p style={{fontSize:13, color: checkIsOnline(u) ? '#34C759' : 'var(--text-sec)', margin:0}}>{formatLastSeen(u)}</p></div>
+                          </button>
+                      );
+                    })}
+                  </div>
+                </div>
             )}
-          </div>
-
-          {m.reactions && typeof m.reactions === 'object' && Object.keys(m.reactions).length > 0 && !isClone && (
-              <div className="reaction-badge">{Array.from(new Set(Object.values(m.reactions))).join(' ')}</div>
-          )}
-        </div>
-    );
-  };
-
-  return (
-      <div className="app-container">
-        <style>{auraStyles(isDark)}</style>
-        <div className="phone-screen">
-          {forwardMsg && (
-              <div style={{position: 'absolute', top: 0, left: 0, right: 0, background: 'var(--ios-blue)', color: 'white', padding: 10, textAlign: 'center', zIndex: 1000, fontWeight: 'bold', animation: 'slideIn 0.3s ease'}}>
-                Выберите чат для пересылки...
-                <button onClick={() => setForwardMsg(null)} style={{background: 'none', border: 'none', color: 'white', position: 'absolute', right: 10, top: 10}}><X size={20}/></button>
-              </div>
-          )}
-
-          {incomingCall && !activeCall && (() => {
-            const callerPeer = allUsers.find(u => u.username === incomingCall?.caller) || { name: incomingCall?.caller, avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${incomingCall?.caller}` };
-            return (
-                <div style={{position: 'absolute', inset: 0, zIndex: 10000, background: isDark ? 'rgba(28,28,30,0.95)' : 'rgba(255,255,255,0.95)', backdropFilter: 'blur(40px)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 80, paddingBottom: 60, animation: 'fadeIn 0.3s ease'}}>
-                  <div style={{color: 'var(--text-main)', fontSize: 32, fontWeight: 'bold'}}>{callerPeer.name}</div>
-                  <div style={{color: 'var(--text-sec)', fontSize: 18, marginTop: 8}}>{incomingCall.type === 'video' ? 'Входящий видеозвонок...' : 'Входящий аудиозвонок...'}</div>
-                  <div style={{flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
-                    <div style={{position: 'relative', width: 160, height: 160}}>
-                      <div className="call-ring"></div>
-                      <img src={callerPeer.avatar} style={{width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', position: 'relative', zIndex: 10, border: '4px solid var(--ios-blue)'}} alt="caller" />
-                    </div>
-                  </div>
-                  <div style={{display: 'flex', gap: 60, marginBottom: 20}}>
-                    <button onClick={declineCall} style={{background: '#FF3B30', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(255,59,48,0.4)'}}>
-                      <Phone size={36} color="white" style={{transform: 'rotate(135deg)'}} />
-                    </button>
-                    <button onClick={answerCall} style={{background: '#34C759', width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(52,199,89,0.4)', animation: 'popIn 0.5s infinite alternate'}}>
-                      <Phone size={36} color="white" />
-                    </button>
-                  </div>
-                </div>
-            );
-          })()}
-
-          {/* --- ЭКРАН АКТИВНОГО ЗВОНКА --- */}
-          {activeCall && (
-              <div style={{position: 'absolute', inset: 0, zIndex: 9999, background: isDark ? 'rgba(28,28,30,0.85)' : 'rgba(255,255,255,0.85)', backdropFilter: 'blur(40px)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 60, paddingBottom: 40, animation: 'fadeIn 0.3s ease'}}>
-                <audio ref={remoteAudioRef} autoPlay />
-
-                {activeCall.type === 'video' && activeCall.status === 'connected' && (
-                    <div className={`local-video-pip ${isScreenSharing ? 'screen-share' : ''}`}>
-                      <video ref={localVideoRef} autoPlay muted playsInline />
-                    </div>
-                )}
-
-                <div style={{color: 'var(--text-main)', fontSize: 32, fontWeight: 'bold', textShadow: '0 2px 10px rgba(0,0,0,0.2)'}}>{activeCall.peer?.name}</div>
-                <div style={{color: 'var(--text-main)', fontSize: 18, marginTop: 8, opacity: 0.8}}>
-                  {activeCall.status === 'calling' ? 'Звонок...' : `На связи ${formatTime(callDuration)}`}
-                </div>
-
-                <div style={{flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', padding: 20}}>
-                  {activeCall.type === 'video' && activeCall.status === 'connected' ? (
-                      <video ref={callVideoRef} autoPlay playsInline style={{width: '100%', height: '100%', objectFit: 'cover', borderRadius: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.3)', transform: 'scaleX(-1)'}} />
-                  ) : (
-                      <div style={{position: 'relative', width: 160, height: 160}}>
-                        {activeCall.status === 'calling' && <div className="call-ring"></div>}
-                        <img src={activeCall.peer?.avatar} style={{width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', border: '4px solid var(--ios-blue)', position: 'relative', zIndex: 10, boxShadow: '0 10px 30px rgba(0,0,0,0.3)'}} alt="caller" />
-                      </div>
-                  )}
-                </div>
-
-                {/* МЕНЮ НАСТРОЕК ЗВУКА ВО ВРЕМЯ ЗВОНКА */}
-                {showCallSettings && (
-                    <div style={{ position: 'absolute', bottom: 120, background: 'var(--card-bg)', padding: 15, borderRadius: 16, zIndex: 10001, boxShadow: '0 10px 30px rgba(0,0,0,0.5)', width: 280, border: '1px solid var(--sep)' }}>
-                      <h4 style={{marginBottom: 10, textAlign: 'center'}}>Настройки устройств</h4>
-                      <div style={{marginBottom: 12}}>
-                        <label style={{fontSize: 12, color: 'var(--text-sec)'}}>Микрофон</label>
-                        <select value={selectedMic} onChange={e => changeMic(e.target.value)} style={{width: '100%', padding: 8, marginTop: 4, borderRadius: 8, background: 'var(--ios-bg)', color: 'var(--text-main)', border: 'none', outline: 'none'}}>
-                          {devices.audioInputs.length === 0 && <option>По умолчанию</option>}
-                          {devices.audioInputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Микрофон ' + d.deviceId.slice(0,5)}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{fontSize: 12, color: 'var(--text-sec)'}}>Динамики (Вывод звука)</label>
-                        <select value={selectedSpeaker} onChange={e => changeSpeaker(e.target.value)} style={{width: '100%', padding: 8, marginTop: 4, borderRadius: 8, background: 'var(--ios-bg)', color: 'var(--text-main)', border: 'none', outline: 'none'}}>
-                          {devices.audioOutputs.length === 0 && <option>По умолчанию</option>}
-                          {devices.audioOutputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Динамик ' + d.deviceId.slice(0,5)}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                )}
-
-                {/* ПАНЕЛЬ УПРАВЛЕНИЯ ЗВОНКОМ */}
-                <div style={{display: 'flex', gap: 20, marginBottom: 20, alignItems: 'center'}}>
-                  {activeCall.type === 'video' && activeCall.status === 'connected' && (
-                      <button onClick={toggleScreenShare} style={{background: isScreenSharing ? 'var(--ios-blue)' : 'var(--card-bg)', border: '1px solid var(--sep)', width: 56, height: 56, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)', transition: '0.2s'}}>
-                        <MonitorUp size={24} color={isScreenSharing ? "white" : "var(--text-main)"} />
-                      </button>
-                  )}
-
-                  <button onClick={toggleMicCall} style={{background: isMicMuted ? 'var(--card-bg)' : 'rgba(255,255,255,0.2)', border: isMicMuted ? '1px solid var(--sep)' : 'none', backdropFilter: 'blur(10px)', width: 64, height: 64, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)', transition: '0.2s'}}>
-                    {isMicMuted ? <MicOff size={28} color="var(--text-main)" /> : <Mic size={28} color="var(--text-main)" />}
-                  </button>
-
-                  <button onClick={endCall} style={{background: '#FF3B30', width: 76, height: 76, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 10px 25px rgba(255,59,48,0.4)'}}>
-                    <Phone size={36} color="white" style={{transform: 'rotate(135deg)'}} />
-                  </button>
-
-                  <button onClick={() => setShowCallSettings(!showCallSettings)} style={{background: showCallSettings ? 'var(--ios-blue)' : 'var(--card-bg)', border: '1px solid var(--sep)', width: 56, height: 56, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)', transition: '0.2s'}}>
-                    <Settings size={24} color={showCallSettings ? "white" : "var(--text-main)"} />
-                  </button>
-                </div>
-              </div>
-          )}
-
-          {view === 'chats' && (
-              <div className="view-container" style={{paddingTop: forwardMsg ? 40 : 0}}>
-                <div className="nav-bar glass-panel"><div style={{fontSize: 32, fontWeight: 800}}>Чаты</div><Edit3 size={24} color="var(--ios-blue)" /></div>
-                <div style={{padding: '10px 16px 12px'}}>
-                  <div style={{background: isDark ? '#1C1C1E' : '#E3E3E8', borderRadius: 10, padding: 10, display: 'flex', alignItems: 'center', gap: 8}}>
-                    <Search size={18} color="#8E8E93" />
-                    <input placeholder="Поиск по имени или @нику" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{background: 'none', border: 'none', outline: 'none', color: 'var(--text-main)', width: '100%', fontSize: 16}} />
-                  </div>
-                </div>
-                <div style={{flex: 1, overflowY: 'auto'}}>
-                  {(!searchQuery || 'общий чат global'.includes(searchQuery.toLowerCase().trim())) && (() => {
-                    const lastGlobal = getLastMessage('global');
-                    return (
-                        <button className="ios-item" onClick={() => { setSelectedPeer({name: 'Общий чат', username: 'global'}); setView('chat_room'); if(forwardMsg){ sendMessage(forwardMsg.text, forwardMsg.type, forwardMsg.name); setForwardMsg(null); } }}>
-                          <div style={{background: 'var(--ios-blue)', width: 50, height: 50, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 14, flexShrink: 0}}><Globe size={26} color="white"/></div>
-                          <div style={{flex: 1, minWidth: 0}}>
-                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'baseline'}}>
-                              <b style={{fontSize: 17}}>Общий чат</b>
-                              {lastGlobal && <span style={{fontSize: 12, color: 'var(--text-sec)'}}>{formatTimeOnly(lastGlobal.ts)}</span>}
-                            </div>
-                            <div style={{fontSize: 14, color: 'var(--text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{lastGlobal ? getMessagePreview(lastGlobal) : 'Групповая беседа'}</div>
-                          </div>
-                        </button>
-                    );
-                  })()}
-
-                  {sortedUsers.map(u => {
-                    const lastMsg = getLastMessage(u.username);
-                    const isPinned = user.pinnedChats?.includes(u.username);
-                    const unreadCount = messages.filter(m => m.uid === u.username && m.to === user.username && !m.read).length;
-
-                    return (
-                        <button key={u.username} className="ios-item"
-                                onContextMenu={(e) => openContextMenu(e, u, 'chat')}
-                                onTouchStart={(e) => { pressTimer.current = setTimeout(() => openContextMenu(e, u, 'chat'), 500); }}
-                                onTouchEnd={() => clearTimeout(pressTimer.current)}
-                                onTouchMove={() => clearTimeout(pressTimer.current)}
-                                onClick={() => { setSelectedPeer(u); setView('chat_room'); if(forwardMsg){ sendMessage(forwardMsg.text, forwardMsg.type, forwardMsg.name); setForwardMsg(null); } }}>
-                          <img src={u.avatar} className="avatar" style={{marginRight: 14}} alt="avatar" />
-                          <div style={{flex: 1, minWidth: 0}}>
-                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'baseline'}}>
-                              <b style={{fontSize: 17, display: 'flex', alignItems: 'center', gap: 5}}>{u.name} {isPinned && <Pin size={14} color="var(--text-sec)" />}</b>
-                              {lastMsg && <span style={{fontSize: 12, color: 'var(--text-sec)'}}>{formatTimeOnly(lastMsg.ts)}</span>}
-                            </div>
-                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                              <div style={{fontSize: 14, color: 'var(--text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1}}>
-                                {lastMsg ? getMessagePreview(lastMsg) : `@${u.username}`}
-                              </div>
-                              {unreadCount > 0 && (
-                                  <div style={{background: 'var(--ios-blue)', color: 'white', borderRadius: '10px', padding: '2px 6px', fontSize: 12, fontWeight: 'bold', marginLeft: 8}}>
-                                    {unreadCount}
-                                  </div>
-                              )}
-                            </div>
-                          </div>
-                          <ChevronRight size={18} color="#C6C6C8" style={{marginLeft: 10, flexShrink: 0}} />
-                        </button>
-                    )
-                  })}
-                </div>
-              </div>
-          )}
-
-          {view === 'calls' && (
-              <div className="view-container">
-                <div className="nav-bar glass-panel"><div style={{fontSize: 32, fontWeight: 800}}>Звонки</div><Phone size={24} color="var(--ios-blue)" /></div>
-                <div style={{flex: 1, overflowY: 'auto'}}>
-                  {myCallLogs.length === 0 && <div style={{textAlign: 'center', color: 'var(--text-sec)', marginTop: 40}}>Нет истории звонков</div>}
-                  {myCallLogs.map((log) => {
+            {view === 'calls' && (
+                <div style={{flex:1, overflowY:'auto', padding: 20}}>
+                  <h3 style={{fontSize: 13, textTransform: 'uppercase', color: 'var(--text-sec)', marginBottom: 20, letterSpacing: 1}}>История звонков</h3>
+                  {callLogs.length === 0 ? (
+                      <div style={{textAlign: 'center', marginTop: 100, opacity: 0.3}}><Phone size={60} style={{margin: '0 auto 15px'}} /><p>Нет звонков</p></div>
+                  ) : callLogs.map(log => {
                     const isIncoming = log.callee === user.username;
-                    const peerUsername = isIncoming ? log.caller : log.callee;
-                    const peer = allUsers.find(u => u.username === peerUsername) || { name: peerUsername, avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${peerUsername}` };
-                    const Icon = log.status === 'missed' ? PhoneMissed : (isIncoming ? PhoneIncoming : Phone);
-                    const color = log.status === 'missed' ? '#FF3B30' : (isIncoming ? 'var(--ios-blue)' : '#34C759');
+                    const peerName = isIncoming ? log.caller : log.callee;
+                    const peerData = allUsers.find(u => u.username === peerName);
+                    const isMissed = log.status === 'calling' || log.status === 'rejected' || (log.status === 'ended' && !log.answer);
                     return (
-                        <div key={log.id} className="ios-item" style={{cursor: 'default'}}>
-                          <img src={peer.avatar} className="avatar" style={{marginRight: 14}} alt="avatar" />
-                          <div style={{flex: 1, minWidth: 0}}>
-                            <b style={{fontSize: 17, color: log.status === 'missed' ? '#FF3B30' : 'inherit'}}>{peer.name}</b>
-                            <div style={{fontSize: 14, color: 'var(--text-sec)', display: 'flex', alignItems: 'center', gap: 5, marginTop: 2}}>
-                              <Icon size={14} color={color} />
-                              {log.type === 'video' ? 'Видеозвонок' : 'Аудиозвонок'}
-                              {log.status === 'missed' && ' (Пропущенный)'}
-                            </div>
-                          </div>
-                          <div style={{textAlign: 'right'}}>
-                            <div style={{fontSize: 13, color: 'var(--text-sec)'}}>{formatTimeOnly(log.ts)}</div>
-                          </div>
+                        <div key={log.id} style={{display: 'flex', alignItems: 'center', gap: 15, marginBottom: 20}}>
+                          <div style={{width: 44, height: 44, borderRadius: '50%', background: isMissed ? 'rgba(255,59,48,0.15)' : 'rgba(52,199,89,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0}}>{isIncoming ? <PhoneIncoming size={20} color={isMissed ? '#FF3B30' : '#34C759'}/> : <PhoneForwarded size={20} color={isMissed ? '#FF3B30' : '#34C759'}/>}</div>
+                          <div style={{flex: 1, overflow: 'hidden'}}><div style={{fontSize: 16, fontWeight: 700, color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{peerData ? safeText(peerData.name) : peerName}</div><div style={{fontSize: 13, color: 'var(--text-sec)', marginTop: 2}}>{log. ts  ? new Date(log. ts ).toLocaleString() : 'Неизвестно'}</div></div>
+                          <button onClick={() => { const p = peerData || {username: peerName, name: peerName, avatar: ''}; setSelectedPeer(p); setView('chats'); }} style={{width: 36, height: 36, borderRadius: '50%', background: 'var(--bg-card)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0}}><MessageCircle size={16} color="var(--aura-red)" /></button>
+                          <button onClick={() => { const p = peerData || {username: peerName, name: peerName, avatar: ''}; setSelectedPeer(p); setView('chats'); startCall(log.type || 'voice', p); }} style={{width: 36, height: 36, borderRadius: '50%', background: 'var(--bg-card)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0}}><PhoneCall size={16} color="var(--aura-red)" /></button>
                         </div>
-                    )
+                    );
                   })}
                 </div>
+            )}
+
+            {/* ТЕЛЕГРАМ-ПОЛОСКА АВТООБНОВЛЕНИЯ ДЛЯ TAURI */}
+            {showUpdate.active && (
+                <div
+                    onClick={async () => {
+                      if (window.__TAURI__) {
+                        try {
+                          const { checkUpdate, installUpdate } = window.__TAURI__.updater;
+                          const { relaunch } = window.__TAURI__.process;
+                          const update = await checkUpdate();
+                          if (update.shouldUpdate) {
+                            alert("Скачивание началось. Приложение перезагрузится после установки.");
+                            await installUpdate();
+                            await relaunch();
+                          }
+                        } catch (e) {
+                          console.error("Tauri Update Error:", e);
+                          alert("Ошибка Tauri Updater. Проверьте tauri.conf.json.");
+                        }
+                      } else {
+                        alert("Это браузерная версия. Автообновление доступно только в .exe");
+                      }
+                    }}
+                    style={{ background: 'var(--aura-red)', color: 'white', padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', animation: 'slideUp 0.3s ease', zIndex: 50 }}
+                >
+                  <div style={{display:'flex', alignItems:'center', gap:12}}>
+                    <div style={{background: 'rgba(255,255,255,0.2)', borderRadius: '50%', padding: 6, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+                      <Download size={18} color="white" />
+                    </div>
+                    <div style={{display:'flex', flexDirection:'column'}}>
+                      <b style={{fontSize: 14, fontWeight: 700, letterSpacing: 0.5}}>Обновление Aura</b>
+                      <span style={{fontSize: 12, opacity: 0.85, marginTop: 2, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 180}}>{showUpdate.message || 'Нажмите, чтобы скачать новую версию'}</span>
+                    </div>
+                  </div>
+                </div>
+            )}
+
+            <div className="tab-bar">              <button className={`tab-btn ${view==='chats'?'active':''}`} onClick={()=>{setView('chats'); setSelectedPeer(null);}}><MessageCircle size={24}/>Чаты</button>              <button className={`tab-btn ${view==='calls'?'active':''}`} onClick={()=>{setView('calls'); setSelectedPeer(null);}}><Phone size={24}/>Звонки</button>              <button className={`tab-btn ${view==='settings'?'active':''}`} onClick={()=>setView('settings')}><Settings size={24}/>Настройки</button>            </div>          </div>          {(view === 'chats' || view === 'calls') && (              <div className={`main-stage ${!selectedPeer ? 'hide' : ''}`}>                {selectedPeer ? (                    <div className="chat-wrapper">                      <div className="nav-bar">                        <div style={{display:'flex', alignItems:'center', gap:15}}>                          <button className="md:hide" onClick={()=>setSelectedPeer(null)} style={{color:'var(--aura-red)'}}><ChevronLeft size={32}/></button>                          <img src={safeText(selectedPeer.avatar) || `https://api.dicebear.com/7.x/initials/svg?seed=${selectedPeer.username}`} className="avatar" style={{width:40, height:40}} alt="p" />                          <div><b style={{fontSize:17, display:'block'}}>{safeText(selectedPeer.name)}</b><span style={{fontSize:12, color: checkIsOnline(allUsers.find(u=>u.username===selectedPeer.username)) ? '#34C759' : 'var(--text-sec)'}}>{formatLastSeen(allUsers.find(u=>u.username===selectedPeer.username))}</span></div>                        </div>                        <div style={{display:'flex', gap:20}}><button onClick={()=>startCall('voice')}><Phone size={22} color="var(--aura-red)"/></button><button onClick={()=>startCall('video')}><Video size={24} color="var(--aura-red)"/></button><button onClick={()=>setShowMediaGallery(!showMediaGallery)}><Info size={22} color="var(--aura-red)"/></button></div>                      </div>                      {pinnedMsg && (<button className="pinned-msg-bar" onClick={()=>scrollRef.current.scrollTo(0,0)}><Pin size={16} color="var(--aura-red)" /><div style={{flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:13}}>{safeText(pinnedMsg.text)}</div><X size={16} opacity={0.5} onClick={(e)=>{ e.stopPropagation(); updateDoc(doc(db,'artifacts',appId,'public','data','messages',pinnedMsg.id), {isPinned: false}); }} /></button>)}                      <div ref={scrollRef} className="chat-scroll">                        <div style={{flex:1}} />                        {chatMessages.filter(m => !(m.hiddenFor || []).includes(user.username)).map(m => (                            <div key={m.id} className={`bubble ${m.uid===user.username?'bubble-me':'bubble-other'}`} onContextMenu={(e)=>{ e.preventDefault(); setContextMenu({type:'msg', id:m.id, rect:e.currentTarget.getBoundingClientRect(), item:m}); }}>                              {m.uid !== user.username && selectedPeer.username === 'global' && <div style={{fontSize:11, fontWeight:800, marginBottom:4, color:'var(--aura-red)'}}>{safeText(m.name)}</div>}                              {m.replyTo && <div className="reply-preview">Ответ: {safeText(m.replyTo.text)}</div>}                              {m.type === 'video_circle' ? <VideoCirclePlayer msg={m} /> : m.type === 'voice' ? <VoicePlayer src={m.text} isMine={m.uid===user.username} /> : m.type === 'image' ? <img src={m.text} className="msg-image" onClick={()=> window .open(m.text,'_blank')} alt="img" /> : m.type === 'file' ? <div className="file-message" onClick={(e) => handleDownload(e, m.text, m.fileName)}><div className="file-icon"><FileIcon size={20}/></div><div className="file-name">{safeText(m.fileName || 'Файл')}</div><Download size={16} style={{marginLeft: 'auto', opacity: 0.7}} /></div> : <div style={{wordBreak: 'break-word'}}>{safeText(m.text)} {m.edited && <span style={{fontSize:10, opacity:0.5}}>(изм.)</span>}</div>}                              <div style={{fontSize:10, opacity:0.6, textAlign:'right', marginTop:6}}>{new Date(m. ts ).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}{m.uid===user.username && (m.read ? <CheckCheck size={14} color="#34C759" style={{marginLeft:4, verticalAlign:'middle'}} /> : <Check size={14} style={{marginLeft:4, verticalAlign:'middle'}} />)}</div>                              {m.reactions && Object.keys(m.reactions).length > 0 && (<div className="reactions-bar">{Object.values(m.reactions).filter(v=>v).map((v, i) => <span key={i} className="reaction-pill">{safeReaction(v)}</span>)}</div>)}                            </div>                        ))}
+
+          {/* ИНДИКАТОР: ПЕЧАТАЕТ... */}
+          {peerIsTyping && (
+              <div className="typing-indicator">
+                <div className="typing-dot" />
+                <div className="typing-dot" />
+                <div className="typing-dot" />
               </div>
           )}
 
-          {view === 'settings' && (
-              <div className="view-container">
-                <div className="nav-bar glass-panel"><div style={{fontSize: 32, fontWeight: 800}}>Настройки</div></div>
-                <div className="ios-list" style={{padding: '24px 0'}}>
-                  <div style={{textAlign: 'center', position: 'relative'}}>
-                    <div style={{position: 'relative', display: 'inline-block'}}>
-                      <img src={user.avatar} className="avatar-huge" onClick={() => avatarInputRef.current?.click()} alt="Profile" style={{cursor: 'pointer'}} />
-                      <div style={{position: 'absolute', bottom: 10, right: -5, background: 'var(--ios-blue)', borderRadius: '50%', padding: 6, border: '3px solid var(--card-bg)', pointerEvents: 'none'}}><Camera size={16} color="white" /></div>
-                      <input type="file" hidden ref={avatarInputRef} accept="image/*" onChange={handleAvatarChange} />
-                    </div>
-                    <h3 style={{fontSize: 22, fontWeight: 800, marginTop: 10}}>{user.name}</h3>
-                    <p style={{color: 'var(--text-sec)', fontSize: 15}}>@{user.username}</p>
-                  </div>
-                </div>
-                <div className="ios-list">
-                  <div className="ios-item" style={{display: 'flex', justifyContent: 'space-between', cursor: 'default'}}>
-                    <span>Статус в сети</span>
-                    <select value={user.privacy || 'online'} onChange={e => updateProfile({ privacy: e.target.value })} style={{background: 'transparent', border: 'none', color: 'var(--ios-blue)', fontSize: 16, outline: 'none'}}>
-                      <option value="online">В сети</option>
-                      <option value="recently">Был(а) недавно</option>
-                    </select>
-                  </div>
-                  <button className="ios-item" onClick={() => { setIsDark(!isDark); localStorage.setItem('aura_dark', !isDark); }}>
-                    <div style={{background: '#5856D6', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 12, color: 'white'}}><Moon size={18}/></div>
-                    <div style={{flex: 1}}>Темная тема</div>
-                    <div style={{color: 'var(--text-sec)'}}>{isDark ? 'Вкл' : 'Выкл'}</div>
-                  </button>
+          {/* ЯКОРЬ ДЛЯ ПЛАВНОГО СКРОЛЛА */}
+          <div ref={messagesEndRef} style={{ height: 1 }} />
+        </div>                      {replyTo && <div className="edit-mode-bar"><span>Ответ: {safeText(replyTo.text).substring(0,30)}...</span><button onClick={()=>setReplyTo(null)}><X size={16}/></button></div>}                      {editingMsg && <div className="edit-mode-bar"><span>Редактирование...</span><button onClick={()=>setEditingMsg(null)}><X size={16}/></button></div>}                      {/* 📁  ПРЕВЬЮ ФАЙЛА */}                      {previewFile && !isUploading && (                          <div className="edit-mode-bar" style={{background: 'var(--bg-card)', borderTop: '1px solid var(--border)', borderRadius: '16px 16px 0 0', margin: '0 20px', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12}}>                            <div style={{width: 40, height: 40, borderRadius: 8, background: 'var(--aura-red)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0}}>                              <FileIcon size={20} color="white" />                            </div>                            <div style={{flex: 1, overflow: 'hidden'}}>                              <div style={{fontSize: 14, fontWeight: 600, color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{previewFile.name}</div>                              <div style={{fontSize: 12, color: 'var(--text-sec)'}}>{(previewFile.size / 1024 / 1024).toFixed(2)} MB</div>                            </div>                            <button onClick={() => setPreviewFile(null)} style={{background: 'rgba(255,255,255,0.1)', padding: 4, borderRadius: '50%', display:'flex'}}><X size={16} color="var(--text-sec)" /></button>                          </div>                      )}                      {/* Контейнер ввода сообщения */}                      <div className="chat-input-wrapper">                        {/* 📊  ПРОГРЕСС ЗАГРУЗКИ И ОТМЕНА */}                        {isUploading && uploadState.active ? (                            <div style={{display:'flex', alignItems:'center', gap: 15, flex: 1, padding: '5px 10px'}}>                              <div style={{position: 'relative', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>                                <svg width="40" height="40" viewBox="0 0 40 40" style={{transform: 'rotate(-90deg)'}}>                                  <circle cx="20" cy="20" r="18" fill="none" stroke="var(--border)" strokeWidth="3" />                                  <circle cx="20" cy="20" r="18" fill="none" stroke="var(--aura-red)" strokeWidth="3" strokeDasharray="113.097" strokeDashoffset={113.097 - (113.097 * uploadState.progress / 100)} strokeLinecap="round" style={{transition: 'stroke-dashoffset 0.2s ease-out'}} />                                </svg>                                <button onClick={cancelUpload} style={{position: 'absolute', background: 'var(--bg-card)', borderRadius: '50%', width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--border)'}}><X size={12} color="var(--text-main)" /></button>                              </div>                              <div style={{display:'flex', flexDirection:'column', flex: 1, overflow:'hidden'}}>                                <span style={{fontSize: 14, fontWeight: 600, color: 'var(--text-main)', whiteSpace:'nowrap', textOverflow:'ellipsis', overflow:'hidden'}}>{uploadState.fileName}</span>                                <span style={{fontSize: 12, color: 'var(--text-sec)'}}>Загрузка... { Math .round(uploadState.progress)}%</span>                              </div>                            </div>                        ) : isUploading ? (                            <div style={{display: 'flex', justifyContent: 'center', width: '100%', padding: '10px 0'}}>                              <RefreshCw className="animate-spin" color="var(--aura-red)" size={24} />                            </div>                        ) : (                            <>                              <button onClick={()=>{  document .getElementById('photo-upload').click(); }}><Paperclip size={26} color="var(--aura-red)" /></button>                              <input type="file" id="photo-upload" accept="*/*" style={{display:'none'}} onChange={handleFileUpload} />                              <input                                  className="premium-input"                                  value={input}                                  onChange={handleTyping}                                  onKeyDown={e => e.key === 'Enter' && sendMessage()}                                  placeholder={previewFile ? "Подпись (необязательно)..." : "Сообщение..."}                              />                              {input.trim() || editingMsg || previewFile ?                                  <button onClick={()=>sendMessage()}><Send size={24} color="var(--aura-red)"/></button>                                  :                                  <div style={{display:'flex', gap:20}}>                                    <button onClick={()=>startMediaRecording('video')}><Camera size={26} color="var(--aura-red)"/></button>                                    <button onClick={()=>startMediaRecording('voice')}><Mic size={26} color="var(--aura-red)"/></button>                                  </div>                              }                            </>                        )}                      </div>                    </div>                ) : (                    <div style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', opacity:0.04}}><Zap size={300} fill="currentColor" /><h1 style={{letterSpacing:25, fontSize:70, fontWeight:900}}>AURA</h1></div>                )}                {showMediaGallery && selectedPeer && (                    <div className="media-panel">                      <div className="nav-bar"><b style={{fontSize:15}}>Медиа история</b><button onClick={()=>setShowMediaGallery(false)}><X size={20} style={{opacity:0.5}} /></button></div>                      <div style={{display:'flex', gap:10, padding:15, borderBottom:'1px solid var(--border)'}}><button style={{flex:1, background: galleryTab === 'image' ? 'rgba(255,59,48,0.1)' : 'transparent', color: galleryTab === 'image' ? 'var(--aura-red)' : 'var(--text-main)', padding:'8px', borderRadius:10, fontWeight:600}} onClick={()=>setGalleryTab('image')}><ImageIcon size={16} style={{marginRight:5, verticalAlign:'middle'}}/> Фото</button><button style={{flex:1, background: galleryTab === 'voice' ? 'rgba(255,59,48,0.1)' : 'transparent', color: galleryTab === 'voice' ? 'var(--aura-red)' : 'var(--text-main)', padding:'8px', borderRadius:10, fontWeight:600}} onClick={()=>setGalleryTab('voice')}><Music size={16} style={{marginRight:5, verticalAlign:'middle'}}/> Голос</button></div>                      <div style={{flex:1, overflowY:'auto', padding:10, display:'grid', gridTemplateColumns: galleryTab === 'image' ? '1fr 1fr' : '1fr', gap:10, alignContent:'start'}}>{chatMessages.filter(m => galleryTab === 'image' ? m.type === 'image' : m.type === 'voice' || m.type === 'video_circle').map(m => (galleryTab === 'image' ? <img key={m.id} src={safeText(m.text)} style={{width:'100%', aspectRatio:'1/1', objectFit:'cover', borderRadius:12, cursor:'pointer'}} onClick={()=> window .open(m.text,'_blank')} alt="img" /> : <div key={m.id} style={{background:'var(--bg-card)', padding:10, borderRadius:12}}>{m.type === 'voice' ? <VoicePlayer src={m.text} /> : <VideoCirclePlayer msg={m} />}</div>))}</div>                    </div>                )}              </div>          )}          {view === 'settings' && (              <div style={{flex:1, background:'var(--bg-main)', display:'flex', flexDirection:'column'}}>                <div className="nav-bar"><button onClick={()=>setView('chats')}><ChevronLeft size={32} color="var(--text-main)"/></button><h2>Настройки Aura</h2><div style={{width:32}}/></div>                <div style={{flex:1, overflowY:'auto', padding:'40px 20px', textAlign:'center'}}><img src={safeText(user?.avatar)} className="avatar" style={{width:140, height:140, border:'4px solid var(--aura-red)', margin:'0 auto 20px', boxShadow:'0 10px 40px var(--aura-red-glow)', display:'block'}} alt="me" /><h2 style={{fontSize:32}}>{safeText(user?.name)}</h2><p style={{opacity:0.5, marginBottom:40}}>@{safeText(user?.username)}</p>                  <div style={{maxWidth:600, margin:'0 auto', display:'grid', gap:20}}>                    {/* --- КНОПКА ВКЛЮЧЕНИЯ УВЕДОМЛЕНИЙ --- */}                    <div style={{background:'var(--bg-card)', padding:25, borderRadius:24, border:'1px solid var(--border)', textAlign:'left'}}>                      <label style={{fontSize:12, textTransform:'uppercase', opacity:0.6, fontWeight:800, letterSpacing:1}}>Уведомления (iOS)</label>                      <p style={{fontSize:13, opacity:0.7, marginTop:5}}>Разрешите системе отправлять пуши, когда приложение свернуто.</p>                      <button onClick={() => {                        if ('Notification' in  window ) {                          Notification.requestPermission().then(p => {                            if (p === 'granted') alert('Уведомления успешно включены!');                            else alert('Разрешение не получено. Проверьте настройки iOS.');                          });                        } else {                          alert('Ваш браузер/iOS пока не поддерживает системные уведомления.');                        }                      }} style={{width:'100%', padding:16, marginTop:15, borderRadius:16, background:'rgba(52,199,89,0.1)', color:'#34C759', display:'flex', alignItems:'center', justifyContent:'center', gap:10, fontWeight:700}}>                        <Bell size={20}/> Включить уведомления                      </button>                    </div>                    <div style={{background:'var(--bg-card)', padding:25, borderRadius:24, border:'1px solid var(--border)', textAlign:'left'}}><label style={{fontSize:12, textTransform:'uppercase', opacity:0.6, fontWeight:800, letterSpacing:1}}>Оформление</label><div style={{display:'flex', gap:10, marginTop:15}}><button onClick={()=>{setTheme('light');  localStorage .setItem('aura_theme','light')}} style={{flex:1, padding:14, borderRadius:16, border:'1px solid var(--border)', background:theme==='light'?'var(--aura-red)':'var(--bg-main)', color:theme==='light'?'#fff':'var(--text-main)', fontWeight:700}}>Light</button><button onClick={()=>{setTheme('dark');  localStorage .setItem('aura_theme','dark')}} style={{flex:1, padding:14, borderRadius:16, border:'1px solid var(--border)', background:theme==='dark'?'var(--aura-red)':'var(--bg-main)', color:theme==='dark'?'#fff':'var(--text-main)', fontWeight:700}}>Dark</button><button onClick={()=>{setTheme('mirror');  localStorage .setItem('aura_theme','mirror')}} style={{flex:1, padding:14, borderRadius:16, border:'1px solid var(--border)', background:theme==='mirror'?'var(--aura-red)':'var(--bg-main)', color:theme==='mirror'?'#fff':'var(--text-main)', fontWeight:700}}>Mirror</button></div></div>                    <div style={{background:'var(--bg-card)', padding:25, borderRadius:24, border:'1px solid var(--border)', textAlign:'left'}}><label style={{fontSize:12, textTransform:'uppercase', opacity:0.6, fontWeight:800, letterSpacing:1}}>Приватность</label><div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:15}}><span style={{fontWeight:600}}>Показывать время захода</span><div onClick={() => { const newVal = user.showLastSeen === false ? true : false; setUser(prev => ({...prev, showLastSeen: newVal})); updateDoc(doc(db,'artifacts',appId,'public','data','users',user.username), { showLastSeen: newVal, status: newVal ? 'online' : Date.now(), lastActiveTS: Date.now() }).catch( console .error); const creds =  JSON .parse( localStorage .getItem('aura_creds') || '{}'); creds.showLastSeen = newVal;  localStorage .setItem('aura_creds',  JSON .stringify(creds)); }} style={{ width: 50, height: 28, borderRadius: 14, background: user.showLastSeen !== false ? '#34C759' : 'rgba(255,255,255,0.1)', position: 'relative', cursor: 'pointer', transition: 'background 0.3s ease' }}><div style={{ width: 24, height: 24, borderRadius: '50%', background: 'white', position: 'absolute', top: 2, left: user.showLastSeen !== false ? 24 : 2, transition: 'left 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)', boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}/></div></div></div>                    <div style={{background:'var(--bg-card)', padding:25, borderRadius:24, border:'1px solid var(--border)', textAlign:'left'}}><label style={{fontSize:12, textTransform:'uppercase', opacity:0.6, fontWeight:800, letterSpacing:1}}>Кэш и Данные</label><button onClick={()=>{  localStorage .removeItem('aura_msgs_cache');  window .location.reload(); }} style={{width:'100%', padding:16, marginTop:15, borderRadius:16, background:'rgba(255,59,48,0.1)', color:'#FF3B30', display:'flex', alignItems:'center', justifyContent:'center', gap:10, fontWeight:700}}><Eraser size={20}/> Очистить локальный кэш</button></div>                    <button className="btn-aura-action" style={{background:'#FF3B30'}} onClick={()=>{ localStorage .clear();  window .location.reload()}}>ВЫЙТИ ИЗ АККАУНТА</button>                  </div></div></div>          )}          {contextMenu && (<div style={{position:'fixed', inset:0, zIndex:5000}} onClick={()=>setContextMenu(null)}><div className="context-menu" style={{top:contextMenu.rect.top, left: contextMenu.type === 'msg' ? contextMenu.rect.left - 100 : contextMenu.rect.left + 50}}>{contextMenu.type === 'msg' ? (<><div style={{padding:'10px', display:'flex', gap:8, borderBottom:'1px solid var(--border)', justifyContent:'center'}}>{[' ❤️ ',' 👍 ',' 🔥 ',' 😮 ',' 😡 '].map(emo => <button key={emo} style={{fontSize:20}} onClick={()=>{ updateDoc(doc(db,'artifacts',appId,'public','data','messages',contextMenu.id), {[`reactions.${user.username}`]: emo}); setContextMenu(null); }}>{emo}</button>)}</div><button className="context-item" onClick={()=>{setReplyTo(contextMenu.item); setContextMenu(null);}}><Reply size={16}/> Ответить</button><button className="context-item" onClick={()=>{updateDoc(doc(db,'artifacts',appId,'public','data','messages',contextMenu.id), {isPinned: !contextMenu.item.isPinned}); setContextMenu(null);}}><Pin size={16}/> {contextMenu.item.isPinned ? 'Открепить' : 'Закрепить'}</button>{contextMenu.item.uid === user.username && <button className="context-item" onClick={()=>{setEditingMsg(contextMenu.item); setInput(typeof contextMenu.item.text === 'string' ? contextMenu.item.text : ''); setContextMenu(null);}}><Edit3 size={16}/> Изменить</button>}<button className="context-item danger" onClick={()=>{ updateDoc(doc(db,'artifacts',appId,'public','data','messages',contextMenu.id), {hiddenFor: arrayUnion(user.username)}); setContextMenu(null); }}><Trash size={16}/> Удалить у себя</button>{(contextMenu.item.uid === user.username || user.role === 'admin') && <button className="context-item danger" onClick={()=>{ deleteDoc(doc(db,'artifacts',appId,'public','data','messages',contextMenu.id)); setContextMenu(null); }}><Trash2 size={16}/> Удалить у всех</button>}</>) : (<><button className="context-item" onClick={()=>{ togglePinChat(contextMenu.item.username); setContextMenu(null); }}><Pin size={16}/> {user.pinnedChats?.includes(contextMenu.item.username) ? 'Открепить диалог' : 'Закрепить диалог'}</button><button className="context-item danger" onClick={()=>{ deleteDialog(contextMenu.item.username, false); setContextMenu(null); }}><Trash size={16}/> Удалить у себя</button><button className="context-item danger" onClick={()=>{ deleteDialog(contextMenu.item.username, true); setContextMenu(null); }}><Trash2 size={16}/> Удалить у обоих</button></>)}</div></div>)}
 
-                  {/* ПАНЕЛЬ АДМИНИСТРАТОРА (УПРАВЛЕНИЕ ОБЛАКОМ ИЗ ПРИЛОЖЕНИЯ) */}
-                  {user.role !== 'admin' ? (
-                      <button className="ios-item" onClick={() => updateProfile({ role: 'admin' })}>
-                        <div style={{background: '#FF9500', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 12, color: 'white'}}><ShieldAlert size={18}/></div>
-                        <div style={{flex: 1, color: '#FF9500', fontWeight: 'bold'}}>Получить права Админа</div>
+          {/* --- НОВЫЙ КРАСИВЫЙ ДИЗАЙН ЗВОНКА СО СВОРАЧИВАНИЕМ И АНИМАЦИЯМИ --- */}
+          {callSession && (
+              <div className={`call-overlay ${isCallMinimized ? 'minimized' : ''}`} onClick={() => isCallMinimized && setIsCallMinimized(false)}>
+
+                {/* Плашка когда звонок свернут */}
+                {isCallMinimized ? (
+                    <div style={{display: 'flex', alignItems: 'center', gap: 10, background: '#34C759', padding: '10px 20px', borderRadius: 30, color: 'white', fontWeight: 600, boxShadow: '0 10px 25px rgba(52,199,89,0.4)'}}>
+                      <PhoneCall size={20} className="animate-pulse" />
+                      <span>{callSession.status === 'active' ? `${Math.floor(callDuration/60).toString().padStart(2,'0')}:${(callDuration%60).toString().padStart(2,'0')}` : 'Звонок...'}</span>
+                      <Maximize size={18} style={{marginLeft: 10}} />
+                    </div>
+                ) : (
+                    /* Полный экран звонка */
+                    <>
+                      <button
+                          onClick={(e) => { e.stopPropagation(); setIsCallMinimized(true); }}
+                          style={{position: 'absolute', top: 'calc(20px + env(safe-area-inset-top))', left: 20, zIndex: 50, background: 'rgba(255,255,255,0.15)', padding: 12, borderRadius: '50%', border: 'none', cursor: 'pointer', backdropFilter: 'blur(10px)'}}>
+                        <Minimize color="white" size={24} />
                       </button>
-                  ) : (
-                      <div className="ios-item" style={{cursor: 'default'}}>
-                        <div style={{background: '#34C759', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 12, color: 'white'}}><ShieldAlert size={18}/></div>
-                        <div style={{flex: 1, color: '#34C759', fontWeight: 'bold'}}>⭐ Права Админа активны</div>
-                      </div>
-                  )}
 
-                  <button className="ios-item" onClick={async () => {
-                    localStorage.removeItem('aura_user');
-                    localStorage.removeItem('aura_creds');
-                    document.cookie = "aura_username=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-                    document.cookie = "aura_password=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-                    if (firebaseUser) {
-                      await deleteDoc(doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'session', 'current')).catch(e=>console.error(e));
-                    }
-                    window.location.reload();
-                  }} style={{color: '#FF3B30'}}>
-                    <div style={{background: '#FF3B30', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 12, color: 'white'}}><LogOut size={18}/></div>
-                    Выйти
-                  </button>
-                </div>
-              </div>
-          )}
+                      <div className="call-bg-blob" />
 
-          {view === 'chat_room' && selectedPeer && (
-              <div className="view-container" style={{position: 'absolute', inset: 0, zIndex: 20}}>
-                <div className="nav-bar glass-panel" style={{paddingTop: 45, paddingBottom: 10, flexDirection: 'column', alignItems: 'stretch'}}>
-                  <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}>
-                    <button onClick={() => setView('chats')} style={{background: 'none', border: 'none', color: 'var(--ios-blue)', cursor: 'pointer', display: 'flex', alignItems: 'center'}}><ChevronLeft size={34} /></button>
-                    <div style={{textAlign: 'center', flex: 1}}><b style={{fontSize: 17, display: 'block'}}>{selectedPeer.name}</b></div>
-                    <div style={{display: 'flex', gap: 15, paddingRight: 5}}>
-                      {selectedPeer.username !== 'global' && (
-                          <>
-                            <button onClick={() => startCall('voice')} style={{background:'none', border:'none', color:'var(--ios-blue)', cursor:'pointer'}}><Phone size={24}/></button>
-                            <button onClick={() => startCall('video')} style={{background:'none', border:'none', color:'var(--ios-blue)', cursor:'pointer'}}><Video size={26}/></button>
-                          </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div ref={scrollRef} className="chat-scroll">
-
-                  {isUploading && (
-                      <div style={{position: 'absolute', top: 85, left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.6)', color: 'white', padding: '6px 16px', borderRadius: 20, fontSize: 13, zIndex: 200, backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', gap: 8, animation: 'popIn 0.3s ease'}}>
-                        <RefreshCw size={14} style={{animation: 'spin 1s linear infinite'}} /> Загрузка медиа...
-                      </div>
-                  )}
-
-                  <div style={{flex: 1}}></div>
-                  {currentMessages.map((m) => <React.Fragment key={m.id}>{renderMessageContent(m)}</React.Fragment>)}
-                </div>
-
-                {isRecording === 'video' ? (
-                    <div style={{
-                      position: 'absolute', inset: 0, zIndex: 3000,
-                      background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)',
-                      backdropFilter: 'blur(15px)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                      animation: 'fadeIn 0.2s ease',
-                      pointerEvents: isLocked ? 'auto' : 'none'
-                    }}>
-                      <div style={{
-                        width: 280, height: 280, borderRadius: '50%', overflow: 'hidden',
-                        border: '5px solid var(--ios-blue)', boxShadow: '0 20px 50px rgba(0,0,0,0.3)',
-                        position: 'relative',
-                        transform: !isLocked ? 'scale(1.1)' : 'scale(1)',
-                        transition: 'transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
-                      }}>
-                        <video ref={videoPreviewRef} autoPlay muted playsInline
-                               style={{width: '100%', height: '100%', objectFit: 'cover', transform: cameraFacing === 'user' ? 'scaleX(-1)' : 'scaleX(1)'}} />
-                      </div>
-
-                      <div style={{marginTop: 30, display: 'flex', alignItems: 'center', gap: 10, color: '#FF3B30', fontWeight: 'bold', fontSize: 28, textShadow: '0 2px 10px rgba(0,0,0,0.2)'}}>
-                        {isPaused ? <span style={{color: 'white', opacity: 0.8, fontSize: 24}}>Пауза</span> : <div style={{width: 14, height: 14, borderRadius: '50%', background: '#FF3B30', animation: 'pulseGlow 1s infinite'}} />}
-                        {formatTime(recTime)}
-                      </div>
-
-                      {isLocked && (
-                          <div style={{display: 'flex', alignItems: 'center', gap: 40, marginTop: 40, animation: 'popIn 0.3s ease'}}>
-                            <button onClick={cancelMediaRecording} style={{background: '#FF3B30', color: 'white', borderRadius: '50%', width: 60, height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 5px 15px rgba(255,59,48,0.4)'}}>
-                              <Trash2 size={28} />
-                            </button>
-                            <button onClick={togglePause} style={{background: 'var(--card-bg)', color: 'var(--text-main)', border: '1px solid var(--sep)', borderRadius: '50%', width: 60, height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)'}}>
-                              {isPaused ? <Play size={28}/> : <Pause size={28}/>}
-                            </button>
-                            <button onClick={flipCamera} style={{background: 'var(--card-bg)', color: 'var(--text-main)', border: '1px solid var(--sep)', borderRadius: '50%', width: 60, height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)'}}>
-                              <RefreshCw size={28} />
-                            </button>
-                            <button onClick={() => { stopMediaRecording(); setIsLocked(false); }} style={{background: 'var(--ios-blue)', color: 'white', borderRadius: '50%', width: 70, height: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,122,255,0.4)'}}>
-                              <Send size={32} />
-                            </button>
+                      {/* В полноэкранном режиме, если это не видеозвонок - показываем красивую панель с аватаркой */}
+                      {(!remoteStreamConnected || callSession.type !== 'video' || callSession.status === 'calling') && (
+                          <div className="call-header-glass">
+                            <div className={`call-avatar-wrapper ${callSession.status === 'calling' ? 'calling' : ''}`}>
+                              <img
+                                  src={callSession.peer?.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${safeText(callSession.caller)}`}
+                                  className="call-avatar-pulse"
+                                  alt="avatar"
+                              />
+                            </div>
+                            <h2 style={{fontSize: 26, fontWeight: 800, margin: 0, zIndex: 2}}>{safeText(callSession.peer?.name || callSession.caller)}</h2>
+                            <div className="call-status-text">
+                              {callSession.status === 'active'
+                                  ? `${Math.floor(callDuration/60).toString().padStart(2,'0')}:${(callDuration%60).toString().padStart(2,'0')}`
+                                  : (callSession.isInitiator ? 'Исходящий вызов...' : 'Входящий звонок...')}
+                            </div>
                           </div>
                       )}
-                    </div>
-                ) : isRecording === 'voice' ? (
-                    <div style={{position: 'absolute', bottom: 85, left: 0, right: 0, display: 'flex', justifyContent: 'center', zIndex: 150}}>
-                      <div className="glass-panel" style={{borderRadius: 40, padding: isLocked ? '10px 20px' : '8px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '90%', maxWidth: 400, boxShadow: '0 10px 25px rgba(0,0,0,0.2)', border: '1px solid var(--sep)'}}>
 
-                        {isLocked && (
-                            <>
-                              <button onClick={cancelMediaRecording} style={{background: 'none', border: 'none', cursor: 'pointer', padding: 8}}><Trash2 size={24} color="#FF3B30"/></button>
-                              <div style={{display: 'flex', alignItems: 'center', gap: 10, color: '#FF3B30', fontWeight: 'bold', fontSize: 18}}>
-                                {isPaused ? <span style={{color: 'var(--text-sec)', fontSize: 16}}>Пауза</span> : <div style={{width: 10, height: 10, borderRadius: '50%', background: '#FF3B30', animation: 'pulseGlow 1s infinite'}} />}
-                                {formatTime(recTime)}
-                              </div>
-                              <button onClick={togglePause} style={{background: 'none', border: 'none', cursor: 'pointer', padding: 8, color: 'var(--ios-blue)'}}>
-                                {isPaused ? <Play size={24} fill="var(--ios-blue)"/> : <Pause size={24} fill="var(--ios-blue)"/>}
-                              </button>
-                              <button onClick={() => { stopMediaRecording(); setIsLocked(false); }} style={{background: 'var(--ios-blue)', color: 'white', borderRadius: '50%', width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer'}}>
-                                <Send size={20} />
-                              </button>
-                            </>
+                      <div style={{position:'absolute', bottom:100, display:'flex', gap:10, zIndex: 20, flexWrap: 'wrap', justifyContent:'center', width:'100%'}}>
+                        {devices?.audioIn?.length > 0 && (
+                            <div className="device-wrapper" onClick={e => e.stopPropagation()}>
+                              <Mic size={14} color="rgba(255,255,255,0.7)" />
+                              <select className="call-device-select" value={selectedDevices.audioIn || ''} onChange={e => setSelectedDevices(prev => ({...prev, audioIn: e.target.value}))}>
+                                {devices.audioIn.map((d, idx) => <option key={d.deviceId || `mic-${idx}`} value={d.deviceId}>{d.label || `Микрофон ${idx + 1}`}</option>)}
+                              </select>
+                            </div>
                         )}
-
+                        {devices?.audioOut?.length > 0 && (
+                            <div className="device-wrapper" onClick={e => e.stopPropagation()}>
+                              <Volume2 size={14} color="rgba(255,255,255,0.7)" />
+                              <select className="call-device-select" value={selectedDevices.audioOut || ''} onChange={e => setSelectedDevices(prev => ({...prev, audioOut: e.target.value}))}>
+                                {devices.audioOut.map((d, idx) => <option key={d.deviceId || `out-${idx}`} value={d.deviceId}>{d.label || `Динамик ${idx + 1}`}</option>)}
+                              </select>
+                            </div>
+                        )}
                       </div>
-                    </div>
-                ) : null}
 
-                {showStickers && (
-                    <div className="glass-panel" style={{position: 'absolute', bottom: 65, left: 0, right: 0, height: 180, zIndex: 40, overflowX: 'auto', display: 'flex', alignItems: 'center', padding: '0 16px', gap: 16}}>
-                      {ANIMATED_STICKERS.map((url, i) => <img key={i} src={url} className="sticker-img-3d" style={{width: 80, height: 80, cursor: 'pointer'}} onClick={() => sendMessage(url, 'sticker')} alt="sticker" />)}
-                    </div>
+                      <div style={{position:'absolute', bottom:30, display:'flex', gap:15, zIndex: 30}}>
+                        <button className="btn-call" onClick={(e) => { e.stopPropagation(); toggleMic(); }} style={{background: callState.micMuted ? '#FF3B30' : 'rgba(255,255,255,0.2)'}}>
+                          {callState.micMuted ? <MicMute color="white" size={20}/> : <Mic color="white" size={20}/>}
+                        </button>
+                        {callSession.type === 'video' && (
+                            <button className="btn-call" onClick={(e) => { e.stopPropagation(); toggleScreenShare(); }} style={{background: callState.screenShare ? 'var(--aura-red)' : 'rgba(255,255,255,0.2)'}}>
+                              <Monitor color="white" size={20}/>
+                            </button>
+                        )}
+                        {!callSession.isInitiator && callSession.status === 'calling' && (
+                            <button onClick={(e) => { e.stopPropagation(); acceptCall(); }} className="btn-call" style={{background:'#34C759'}}>
+                              <Phone color="white"/>
+                            </button>
+                        )}
+                        <button onClick={(e) => { e.stopPropagation(); endCall(); }} className="btn-call" style={{background:'#FF3B30'}}>
+                          <PhoneOff color="white"/>
+                        </button>
+                      </div>
+                    </>
                 )}
 
-                <div className="glass-panel" style={{padding: '10px 16px 25px', display: 'flex', gap: 10, alignItems: 'flex-end', borderTop: '0.5px solid var(--sep)', position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 50}}>
-                  <button style={{background: 'none', border: 'none', color: 'var(--text-sec)', cursor: 'pointer', paddingBottom: 6}} onClick={() => fileInputRef.current?.click()}>
-                    <Paperclip size={26} /><input type="file" hidden ref={fileInputRef} accept="image/*" onChange={e => { const f = e.target.files[0]; if(f){ const r = new FileReader(); r.onload=()=>sendMessage(r.result,'image'); r.readAsDataURL(f); } }} />
-                  </button>
-
-                  <div style={{flex: 1, position: 'relative', display: 'flex', alignItems: 'center'}}>
-                    <textarea style={{width: '100%', padding: '9px 40px 9px 16px', borderRadius: 20, border: `1px solid var(--sep)`, background: isDark ? '#2C2C2E' : '#FFFFFF', color: 'var(--text-main)', fontSize: 16, outline: 'none', resize: 'none', maxHeight: 100}} rows={1} value={input} onChange={e => setInput(e.target.value)} placeholder="Сообщение" onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }} />
-                    <button style={{position: 'absolute', right: 10, background: 'none', border: 'none', color: showStickers ? 'var(--ios-blue)' : 'var(--text-sec)', cursor: 'pointer', bottom: 6}} onClick={() => setShowStickers(!showStickers)}><Smile size={24} /></button>
-                  </div>
-
-                  {input.trim() ? (
-                      <button onClick={() => sendMessage(input)} style={{background: 'var(--ios-blue)', borderRadius: '50%', width: 36, height: 36, border: 'none', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', marginBottom: 2}}><Send size={18}/></button>
-                  ) : (
-                      <button
-                          onPointerDown={handlePointerDown}
-                          onPointerUp={handlePointerUp}
-                          style={{
-                            touchAction: 'none',
-                            background: 'none', border: 'none',
-                            color: isRecording ? '#FF3B30' : 'var(--text-sec)',
-                            cursor: 'pointer', paddingBottom: 6,
-                            transform: isRecording && !isLocked ? 'scale(1.2)' : 'scale(1)',
-                            transition: 'transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
-                          }}
-                      >
-                        <div style={{ transition: 'transform 0.3s ease', transform: `rotate(${mode === 'video' ? '360deg' : '0deg'})` }}>
-                          {mode === 'voice' ? <Mic size={26}/> : <Camera size={26}/>}
-                        </div>
-                      </button>
-                  )}
-                </div>
+                {/* Видео-теги остаются в DOM всегда, чтобы стрим не прерывался при сворачивании */}
+                <video ref={remoteVideoRef} className="call-video-main" autoPlay playsInline style={{ display: isCallMinimized ? 'none' : 'block' }} />
+                <video ref={localVideoRef} className="call-video-pip" autoPlay playsInline muted style={{ display: isCallMinimized ? 'none' : 'block' }} />
               </div>
           )}
 
-          {contextMenu && (
-              <div className="blur-overlay" onClick={closeContextMenu}>
-                {contextMenu.type === 'message' && (() => {
-                  const isMine = contextMenu.item.uid === user.username;
-                  const isAdmin = user.role === 'admin';
-
-                  return (
-                      <div style={{
-                        position: 'absolute',
-                        top: Math.max(50, contextMenu.rect.top - 60),
-                        [isMine ? 'right' : 'left']: isMine ? (window.innerWidth - contextMenu.rect.right) : contextMenu.rect.left,
-                        zIndex: 2001,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: isMine ? 'flex-end' : 'flex-start',
-                        maxWidth: '85vw'
-                      }} onClick={e => e.stopPropagation()}>
-
-                        <div className="glass-panel" style={{display: 'flex', gap: 12, padding: '10px 16px', borderRadius: 30, marginBottom: 8, boxShadow: '0 10px 25px rgba(0,0,0,0.2)'}}>
-                          {['❤️', '👍', '👎', '😂', '😮', '😢'].map(e => (
-                              <span key={e} onClick={(ev) => handleReaction(e, ev)} style={{fontSize: 26, cursor: 'pointer', transition: 'transform 0.1s'}} onMouseDown={(e)=>e.target.style.transform='scale(1.2)'} onMouseUp={(e)=>e.target.style.transform='scale(1)'}>{e}</span>
-                          ))}
-                        </div>
-
-                        <div style={{transform: 'scale(1.02)', transformOrigin: isMine ? 'right center' : 'left center', transition: 'transform 0.2s', zIndex: 2}}>
-                          {renderMessageContent(contextMenu.item, true)}
-                        </div>
-
-                        <div className="context-menu-popup" style={{position: 'relative', marginTop: 12, left: 0, top: 0, right: 0, width: 250, zIndex: 2}}>
-                          <button className="context-menu-btn" onClick={togglePinMessage}><Pin size={18} /> {contextMenu.item.isPinned ? 'Открепить' : 'Закрепить'}</button>
-                          <button className="context-menu-btn" onClick={handleForwardStart}><Forward size={18} /> Переслать</button>
-
-                          <button className="context-menu-btn danger" onClick={(e) => deleteMessage('me', e)}><Trash size={18} /> Удалить у себя</button>
-
-                          {/* АДМИН ИЛИ ВЛАДЕЛЕЦ МОЖЕТ УДАЛИТЬ У ВСЕХ */}
-                          {(isMine || isAdmin) && (
-                              <button className="context-menu-btn danger" onClick={(e) => deleteMessage('both', e)} style={{borderBottom: 'none'}}>
-                                <Trash2 size={18} /> {isAdmin && !isMine ? 'Удалить как Админ' : 'Удалить у всех'}
-                              </button>
-                          )}
-                        </div>
-
-                      </div>
-                  );
-                })()}
-
-                {contextMenu.type === 'chat' && (
-                    <div className="context-menu-popup" style={{ top: Math.min(contextMenu.rect.bottom - 20, window.innerHeight - 120), left: Math.max(20, contextMenu.rect.left + 50) }} onClick={e => e.stopPropagation()}>
-                      <button className="context-menu-btn" onClick={togglePinChat} style={{borderBottom: 'none'}}><Pin size={18} /> {user.pinnedChats?.includes(contextMenu.item.username) ? 'Открепить чат' : 'Закрепить чат'}</button>
-                    </div>
-                )}
-              </div>
-          )}
-
-          {view !== 'chat_room' && (
-              <div className="tab-bar glass-panel">
-                <button className={`tab-item ${view === 'chats' ? 'active' : ''}`} onClick={() => setView('chats')}><MessageCircle size={28} /><span>Чаты</span></button>
-                <button className={`tab-item ${view === 'calls' ? 'active' : ''}`} onClick={() => setView('calls')}><Phone size={28} /><span>Звонки</span></button>
-                <button className={`tab-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}><UserIcon size={28} /><span>Настройки</span></button>
-              </div>
-          )}
-        </div>
-      </div>
-  );
-}
-
-export default function App() {
-  return (
-      <ErrorBoundary>
-        <MainApp />
-      </ErrorBoundary>
-  );
-}
+          {/* 🌟  ОКНО ЗАПИСИ  🌟  */}          {isRecording && (<div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.9)', zIndex:200000, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center'}}>            <div style={{display:'flex', alignItems:'center', gap:15, marginBottom:20}}>              <div style={{width:16, height:16, background:'#FF3B30', borderRadius:'50%', animation:'pulse 1s infinite'}} />              <span style={{fontSize:40, fontWeight:800}}>{ Math .floor(recTime/60)}:{(recTime%60).toString().padStart(2,'0')}</span>            </div>            {isRecording === 'video' && (<div className="circle-video" style={{marginBottom:30, width: 280, height: 280}}><video ref={v => { if(v) v.srcObject = mediaRec.current?.stream; }} autoPlay muted style={{width:'100%', height:'100%', objectFit:'cover', transform:'scaleX(-1)'}} /></div>)}            <div style={{display:'flex', gap:30}}>              <button onClick={()=>{ stopMediaRecording(true); }} style={{background:'rgba(255,255,255,0.1)', color:'white', padding:'16px 40px', borderRadius:25, fontWeight:700}}>ОТМЕНА</button>              <button onClick={()=>stopMediaRecording(false)} style={{background:'var(--aura-red)', color:'white', padding:'16px 50px', borderRadius:25, fontWeight:800}}>ОТПРАВИТЬ</button>            </div>          </div>)}          {toast && <AuraToast data={toast} onClose={()=>setToast(null)} onClick={()=>{ setSelectedPeer(allUsers.find(u=>u.username===toast.uid)); setView('chats'); setToast(null); }} />}        </div>      </div>  );}export default function App() { return <ErrorBoundary><MainApp /></ErrorBoundary>; }
