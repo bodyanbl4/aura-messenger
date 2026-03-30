@@ -52,7 +52,6 @@ jobs:
       - name: Setup iOS Project
         run: |
           cd ios/App
-          
           cat <<EOF > Podfile
           platform :ios, '13.0'
           use_frameworks! :linkage => :static
@@ -73,19 +72,16 @@ jobs:
             end
           end
           EOF
-          
           pod install --repo-update
 
       - name: Configure App
         run: |
           cd ios/App/App
-          
           /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Voice messages and calls'" Info.plist 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Video calls and photos'" Info.plist 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Share images'" Info.plist 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" Info.plist 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" Info.plist 2>/dev/null || true
-          
           /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Aura" Info.plist 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Set :CFBundleName Aura" Info.plist 2>/dev/null || true
 
@@ -105,10 +101,9 @@ jobs:
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
           zip -qr Aura.ipa Payload
-          mv Aura.ipa ../../../
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: Aura-iOS
-          path: Aura.ipa
+          path: ios/App/Aura.ipa
