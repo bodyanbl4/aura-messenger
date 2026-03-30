@@ -1,45 +1,62 @@
 name: Build iOS IPA
 
 on:
-  workflow_dispatch: # Позволяет запускать сборку кнопкой
+  workflow_dispatch:
 
 jobs:
   build:
     name: Build iOS App
-    runs-on: macos-latest # Тот самый бесплатный Mac от GitHub!
+    runs-on: macos-latest
 
     steps:
       - name: Checkout Source Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
 
       - name: Install dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       - name: Build React App
-        run: npm run build # Внимание: если используешь Vite, убедись что команда правильная
+        run: CI=false npm run build
 
-      - name: Sync Capacitor (Копируем код в iOS)
-        run: npx cap sync ios
+      - name: Fix and Sync Capacitor
+        run: |
+          npm install @capacitor/cli @capacitor/core @capacitor/ios
+          
+          # Инициализируем Capacitor, если его еще нет
+          if [ ! -f capacitor.config.json ] && [ ! -f capacitor.config.ts ]; then
+            npx cap init Aura com.aura.app --web-dir build
+          fi
+          
+          # Если папки ios нет или она пришла сломанной с Windows, пересоздаем её на Mac
+          if [ ! -f ios/App/Podfile ]; then
+            rm -rf ios
+            npx cap add ios
+          fi
+          
+          npx cap sync ios
 
-      - name: Build Unsigned IPA (Сборка без платного аккаунта Apple)
+      - name: Install CocoaPods dependencies
         run: |
           cd ios/App
-          # Собираем сырое приложение, отключая проверку сертификатов за $99
+          pod install
+
+      - name: Build Unsigned IPA
+        run: |
+          cd ios/App
           xcodebuild -workspace App.xcworkspace -scheme App -configuration Release -sdk iphoneos CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO clean build
           
-          # Упаковываем это в формат .ipa
           cd build/Release-iphoneos
           mkdir Payload
           cp -R App.app Payload
           zip -qr Aura-App.ipa Payload
 
       - name: Upload IPA File
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: Aura-iOS
           path: ios/App/build/Release-iphoneos/Aura-App.ipa
