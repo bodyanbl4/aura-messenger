@@ -1,0 +1,45 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch: # Позволяет запускать сборку кнопкой
+
+jobs:
+  build:
+    name: Build iOS App
+    runs-on: macos-latest # Тот самый бесплатный Mac от GitHub!
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build React App
+        run: npm run build # Внимание: если используешь Vite, убедись что команда правильная
+
+      - name: Sync Capacitor (Копируем код в iOS)
+        run: npx cap sync ios
+
+      - name: Build Unsigned IPA (Сборка без платного аккаунта Apple)
+        run: |
+          cd ios/App
+          # Собираем сырое приложение, отключая проверку сертификатов за $99
+          xcodebuild -workspace App.xcworkspace -scheme App -configuration Release -sdk iphoneos CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO clean build
+          
+          # Упаковываем это в формат .ipa
+          cd build/Release-iphoneos
+          mkdir Payload
+          cp -R App.app Payload
+          zip -qr Aura-App.ipa Payload
+
+      - name: Upload IPA File
+        uses: actions/upload-artifact@v3
+        with:
+          name: Aura-iOS
+          path: ios/App/build/Release-iphoneos/Aura-App.ipa

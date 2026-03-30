@@ -1,0 +1,5 @@
+{
+  "appId": "com.aura.app",
+  "appName": "aura-messenger-client",
+  "webDir": "dist"
+}
