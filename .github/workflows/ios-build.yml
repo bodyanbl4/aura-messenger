@@ -21,7 +21,12 @@ jobs:
         run: npm install --legacy-peer-deps
 
       - name: Build React App
-        run: CI=false npm run build
+        run: |
+          CI=false npm run build
+          # Если сборщик создал папку dist вместо build, переименовываем её!
+          if [ -d "dist" ] && [ ! -d "build" ]; then
+            mv dist build
+          fi
 
       - name: Fix and Sync Capacitor
         run: |
