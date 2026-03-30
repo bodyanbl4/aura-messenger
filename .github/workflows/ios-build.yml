@@ -29,47 +29,148 @@ jobs:
           fi
           # На всякий случай гарантируем, что папка build существует
           mkdir -p build
-          if [ ! -f build/index.html ]; then echo "<html><body>Aura</body></html>" > build/index.html; fi
+          if [ ! -f build/index.html ]; then 
+            echo "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0, viewport-fit=cover'><title>Aura</title></head><body><div id='root'></div><script>document.getElementById('root').innerHTML='<h1>Aura Messenger</h1><p>Loading...</p>'</script></body></html>" > build/index.html
+          fi
 
-      - name: Fix and Sync Capacitor
+      - name: Setup Capacitor
         run: |
-          # Устанавливаем сам Capacitor и платформу iOS в систему
-          npm install @capacitor/cli @capacitor/core @capacitor/ios --save-dev
+          # Устанавливаем Capacitor
+          npm install @capacitor/cli @capacitor/core @capacitor/ios @capacitor/app @capacitor/haptics @capacitor/keyboard @capacitor/status-bar --save-dev
           
-          # Принудительно и жестко создаем правильный конфиг
+          # Создаем конфигурацию Capacitor
           cat <<EOF > capacitor.config.json
           {
             "appId": "com.aura.app",
             "appName": "Aura",
             "webDir": "build",
-            "bundledWebRuntime": false
+            "bundledWebRuntime": false,
+            "server": {
+              "androidScheme": "https"
+            },
+            "ios": {
+              "contentInset": "always",
+              "backgroundColor": "#000000"
+            }
           }
           EOF
           
-          # Сносим старую сломанную папку ios, если она есть
+          # Удаляем старые папки если есть
           rm -rf ios
           
-          # Генерируем чистый проект Apple
+          # Добавляем iOS платформу
           npx cap add ios
+          
+          # Синхронизируем веб-код
           npx cap sync ios
 
-      - name: Build Unsigned IPA
+      - name: Create Podfile and Configure iOS Project
         run: |
           cd ios/App
-          # Обновляем зависимости Apple
+          
+          # Создаем Podfile вручную если его нет
+          if [ ! -f "Podfile" ]; then
+            cat <<EOF > Podfile
+          platform :ios, '13.0'
+          
+          target 'App' do
+            use_frameworks! :linkage => :static
+            pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'
+            pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
+            pod 'CapacitorHaptics', :path => '../../node_modules/@capacitor/haptics'
+            pod 'CapacitorKeyboard', :path => '../../node_modules/@capacitor/keyboard'
+            pod 'CapacitorStatusBar', :path => '../../node_modules/@capacitor/status-bar'
+          end
+          EOF
+          fi
+          
+          # Устанавливаем CocoaPods зависимости
           pod install --repo-update
+
+      - name: Update Info.plist for Permissions
+        run: |
+          cd ios/App/App
           
-          # Собираем приложение без платных сертификатов
-          xcodebuild -workspace App.xcworkspace -scheme App -configuration Release -sdk iphoneos CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO clean build
+          # Добавляем необходимые разрешения в Info.plist
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Aura needs microphone access for voice messages and calls'" Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Aura needs camera access for video calls and photos'" Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Aura needs photo library access to share images'" Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string 'audio'" Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:1 string 'voip'" Info.plist 2>/dev/null || true
+
+      - name: Build iOS App (Unsigned)
+        run: |
+          cd ios/App
           
-          # Упаковываем в IPA
-          cd build/Release-iphoneos
-          mkdir Payload
-          cp -R App.app Payload
+          # Собираем приложение без подписи
+          xcodebuild -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            clean build
+
+      - name: Create IPA
+        run: |
+          cd ios/App
+          
+          # Находим собранный .app
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" | head -n 1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ App not found!"
+            exit 1
+          fi
+          
+          echo "Found app at: $APP_PATH"
+          
+          # Создаем Payload папку и копируем app
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          
+          # Создаем IPA
           zip -qr Aura-App.ipa Payload
+          
+          # Перемещаем IPA в удобное место
+          mv Aura-App.ipa ../../Aura-App.ipa
 
       - name: Upload IPA File
         uses: actions/upload-artifact@v4
         with:
           name: Aura-iOS
-          path: ios/App/build/Release-iphoneos/Aura-App.ipa
+          path: Aura-App.ipa
+
+      - name: Create Simulator Build (for testing)
+        run: |
+          cd ios/App
+          
+          # Собираем для симулятора
+          xcodebuild -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -derivedDataPath sim-build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            clean build
+          
+          # Находим .app для симулятора
+          SIM_APP_PATH=$(find sim-build/Build/Products/Debug-iphonesimulator -name "*.app" | head -n 1)
+          
+          if [ -n "$SIM_APP_PATH" ]; then
+            # Создаем .app архив для симулятора
+            zip -qr Aura-Simulator.app.zip "$SIM_APP_PATH"
+            mv Aura-Simulator.app.zip ../../
+          fi
+
+      - name: Upload Simulator Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aura-iOS-Simulator
+          path: Aura-Simulator.app.zip
