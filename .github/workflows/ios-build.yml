@@ -27,9 +27,8 @@ jobs:
             mv dist build
           fi
           mkdir -p build
-          if [ ! -f build/index.html ]; then
-            echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"><title>Aura</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0A0A0F;color:#fff}#root{display:flex;justify-content:center;align-items:center;min-height:100vh}.loading{text-align:center}.logo{width:80px;height:80px;background:linear-gradient(135deg,#FF3B30,#FF6B5E);border-radius:24px;margin:0 auto 20px;animation:pulse 1.5s infinite}@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}h1{font-size:32px;margin-bottom:10px}p{color:#8E8E93}</style></head><body><div id="root"><div class="loading"><div class="logo"></div><h1>AURA</h1><p>Loading...</p></div></div></body></html>' > build/index.html
-          fi
+          # КРИТИЧЕСКИЙ ФИКС: Внедряем viewport-fit=cover, чтобы кнопки внизу нажимались
+          echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"><title>Aura</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0A0A0F;color:#fff}#root{display:flex;justify-content:center;align-items:center;min-height:100vh}.loading{text-align:center}.logo{width:80px;height:80px;background:linear-gradient(135deg,#FF3B30,#FF6B5E);border-radius:24px;margin:0 auto 20px;animation:pulse 1.5s infinite}@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}h1{font-size:32px;margin-bottom:10px}p{color:#8E8E93}</style></head><body><div id="root"></div></body></html>' > build/index.html
 
       - name: Setup Capacitor
         run: |
@@ -41,7 +40,11 @@ jobs:
             "appId": "com.aura.app",
             "appName": "Aura",
             "webDir": "build",
-            "bundledWebRuntime": false
+            "bundledWebRuntime": false,
+            "server": {
+              "iosScheme": "capacitor",
+              "androidScheme": "http"
+            }
           }
           EOF
           
@@ -49,7 +52,7 @@ jobs:
           npx cap add ios
           npx cap sync ios
 
-      - name: Setup iOS Project
+      - name: Setup iOS Project (Fixing Podfile)
         run: |
           cd ios/App
           cat <<EOF > Podfile
@@ -74,16 +77,17 @@ jobs:
           EOF
           pod install --repo-update
 
-      - name: Configure App
+      - name: Configure iOS Permissions (Info.plist)
         run: |
           cd ios/App/App
-          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Voice messages and calls'" Info.plist 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Video calls and photos'" Info.plist 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Share images'" Info.plist 2>/dev/null || true
+          # Добавляем описания, почему нам нужны камера и микрофон (без этого iOS блокирует функции)
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Нужен для звонков и голосовых сообщений'" Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Нужен для видеозвонков'" Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Нужен для отправки фото'" Info.plist 2>/dev/null || true
+          
+          # Разрешаем приложению подключаться к интернету свободно
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" Info.plist 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" Info.plist 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Aura" Info.plist 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Set :CFBundleName Aura" Info.plist 2>/dev/null || true
 
       - name: Build App
         run: |
